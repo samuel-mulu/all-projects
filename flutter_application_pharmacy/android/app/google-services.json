@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "985890978569",
+    "firebase_url": "https://pharmacy-400dd-default-rtdb.firebaseio.com",
+    "project_id": "pharmacy-400dd",
+    "storage_bucket": "pharmacy-400dd.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:985890978569:android:7bc3a6200b1a178f0931d8",
+        "android_client_info": {
+          "package_name": "pharmacy.com"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB6RjQP_r0Ns6GX8NKy6VOluZvuDyvgFUk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
