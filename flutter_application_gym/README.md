@@ -1,16 +1,55 @@
-# flutter_application_4
+# 🏋️‍♂️ Gym Flutter App
 
-A new Flutter project.
+> A powerful Flutter app for managing gym memberships and operations locally, featuring live counters, detailed reports, and real-time updates.  
+> Built with Firebase Authentication and Firestore database for seamless backend support.
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## ✨ Features
 
-A few resources to get you started if this is your first Flutter project:
+- 🔐 **Firebase Email/Password Authentication** with role-based access (Admin & Cashier)  
+- ⏳ **Live 30-day counter** tracking new memberships and activities  
+- 📊 **Monthly and yearly reports** with detailed analytics and profit calculations  
+- 👥 **Active and inactive member tracking** with real-time status updates  
+- ⚡ **Real-time data syncing** with Firestore for instant UI updates  
+- 🎨 **User-friendly and modern UI** optimized for smooth user experience  
+- 🛠️ **Admin panel** to manage members, subscriptions, and reports  
+- 💳 **Cashier panel** for processing membership sales and renewals  
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 🛠️ Technologies Used
+
+- 🐦 Flutter (Dart) for mobile app development  
+- 🔥 Firebase Authentication for secure login  
+- ☁️ Cloud Firestore for real-time database  
+- ⚙️ Provider / Bloc / GetX (choose your state management)  
+- 🧩 Custom widgets for clean and responsive UI  
+
+---
+
+## 🗂️ Screens and Modules
+
+- 🔑 **Authentication Screens:** Login, Registration, and Role Selection  
+- 📈 **Admin Dashboard:**  
+  - 🕒 View live counters (new members, active members, inactive members)  
+  - 📅 Generate and export monthly/yearly profit and activity reports  
+  - 🗃️ Manage memberships and subscriptions  
+- 💼 **Cashier Dashboard:**  
+  - 💸 Process membership sales and renewals  
+  - 🧾 View daily transactions and receipts  
+
+---
+
+## 🚀 Setup & Installation
+
+```bash
+# Clone the repository
+git clone 
+cd gym_flutter_app
+
+# Install dependencies
+flutter pub get
+
+# Run the app
+flutter run
