@@ -1,8 +1,11 @@
 // login_page.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart'; // Import the database package
 import 'home_page.dart'; // Import the home page
+import 'main.dart'; // Import main to access RoleBasedRouter
+import 'utils/reliable_text_widget.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -32,6 +35,14 @@ class _LoginPageState extends State<LoginPage>
     );
   }
 
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _animationController.dispose();
+    super.dispose();
+  }
+
   Future<void> _signIn() async {
     setState(() {
       _isLoading = true;
@@ -39,133 +50,95 @@ class _LoginPageState extends State<LoginPage>
     });
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      // Ensure persistence is enabled (should already be set in main.dart)
+      if (!kIsWeb) {
+        // For mobile, persistence is automatic
+        print('Mobile platform - Auth persistence is automatic');
+      }
+      
+      UserCredential userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      // Navigate to the home page on successful sign-in
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-            builder: (context) => const MyHomePage(title: 'Alpha gym')),
-      );
+      
+      // Verify the user is actually signed in
+      if (userCredential.user != null) {
+        print('Login successful for user: ${userCredential.user!.email}');
+        
+        // Show success message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Login successful! Redirecting..."),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 1),
+            ),
+          );
+          
+          // Clear the form
+          _emailController.clear();
+          _passwordController.clear();
+          
+          // Force a small delay to ensure the auth state is updated
+          await Future.delayed(const Duration(milliseconds: 1000));
+          
+          // Always force navigation after successful login to ensure it works
+          if (mounted) {
+            print('Login - Navigating to dashboard');
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (context) => const RoleBasedRouter(),
+              ),
+            );
+          }
+        }
+      } else {
+        throw Exception('User credential is null after successful login');
+      }
     } on FirebaseAuthException catch (e) {
+      print('Firebase Auth Error: ${e.code} - ${e.message}');
       // Handle specific Firebase Auth errors
+      if (mounted) {
       setState(() {
-        _errorMessage = e.message; // Set the error message
+          _errorMessage = _getFirebaseErrorMessage(e.code);
       });
+      }
     } catch (e) {
+      print('General Error: $e');
       // Handle any other errors
+      if (mounted) {
       setState(() {
         _errorMessage = "An error occurred. Please try again.";
       });
+      }
     } finally {
+      if (mounted) {
       setState(() {
         _isLoading = false;
       });
     }
   }
+  }
 
-  // Sign-up method
-  Future<void> _signUp() async {
-    final email = _emailController.text.trim();
-    final password = _passwordController.text.trim();
-
-    if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter email and password.")),
-      );
-      return;
-    }
-
-    try {
-      UserCredential userCredential = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(email: email, password: password);
-
-      // After user is created, prompt for additional information
-      _showSignUpDialog(userCredential.user!.email);
-    } on FirebaseAuthException catch (e) {
-      setState(() {
-        _errorMessage = e.message; // Set the error message
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = "An error occurred. Please try again.";
-      });
+  String _getFirebaseErrorMessage(String errorCode) {
+    switch (errorCode) {
+      case 'user-not-found':
+        return 'No user found with this email address.';
+      case 'wrong-password':
+        return 'Incorrect password.';
+      case 'invalid-email':
+        return 'Invalid email address.';
+      case 'user-disabled':
+        return 'This account has been disabled.';
+      case 'too-many-requests':
+        return 'Too many failed attempts. Please try again later.';
+      case 'network-request-failed':
+        return 'Network error. Please check your connection.';
+      default:
+        return 'Login failed. Please try again.';
     }
   }
 
-  // Show dialog for additional user information
-  void _showSignUpDialog(String? email) {
-    final TextEditingController _nameController = TextEditingController();
-    String selectedRole = 'user'; // Default role
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text("Complete Registration"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: "Name",
-                ),
-              ),
-              DropdownButton<String>(
-                value: selectedRole,
-                items: <String>['user', 'admin']
-                    .map<DropdownMenuItem<String>>((String value) {
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                onChanged: (String? newValue) {
-                  setState(() {
-                    selectedRole = newValue!;
-                  });
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text("Cancel"),
-            ),
-            TextButton(
-              onPressed: () async {
-                // Save user information to the Realtime Database
-                await _saveUserToDatabase(
-                    email!, _nameController.text, selectedRole);
-                Navigator.of(context).pop();
-              },
-              child: const Text("Register"),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  // Save user information to the Realtime Database
-  Future<void> _saveUserToDatabase(
-      String email, String name, String role) async {
-    final userRef =
-        FirebaseDatabase.instance.ref("members/${email.replaceAll('.', '_')}");
-    await userRef.set({
-      'role': role,
-      'name': name,
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Registration successful!")),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -253,16 +226,6 @@ class _LoginPageState extends State<LoginPage>
                               ),
                             ),
                       const SizedBox(height: 10),
-                      // Add sign-up button
-                      TextButton(
-                        onPressed: () {
-                          _signUp(); // Call the sign-up function
-                        },
-                        child: const Text(
-                          'Sign Up',
-                          style: TextStyle(color: Colors.deepPurpleAccent),
-                        ),
-                      ),
                       TextButton(
                         onPressed: () => _resetPassword(),
                         child: const Text(

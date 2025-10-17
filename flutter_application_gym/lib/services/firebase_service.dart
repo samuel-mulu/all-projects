@@ -42,12 +42,17 @@ class FirebaseService {
         'lockerKey': memberData['lockerKey'], // Locker Key
         'membership': memberData['membership'], // Membership type
         'status': 'registered member', // Status for new member registration
-        'weight': memberData['weight'], // Weight
+        'phoneNumber': memberData['phoneNumber'], // Phone Number
+        'paymentMethod': memberData['paymentMethod'], // Payment Method
+        'paymentImageUrl': memberData['paymentImageUrl'], // Payment Image URL
+        'profileImageUrl': memberData['profileImageUrl'], // Profile Image URL
+        'remaining': memberData['remaining'], // Remaining amount (ቀሪ)
+        // Register errors only tracked for active member updates, not re-registrations
         'registerDate':
             memberData['registerDate'], // Include register date in report
       };
 
-      // Add the report to the "reporte" collection under the new member's unique ID
+      // Add the report to the top-level "reporte" collection
       await _reporteRef.child(newMemberRef.key!).set(reportData);
 
       // Return the generated memberId (Firebase key)
@@ -70,17 +75,22 @@ class FirebaseService {
         'lastName': memberData['lastName'], // Last Name
         'lockerKey': memberData['lockerKey'], // Locker Key
         'membership': memberData['membership'], // Membership type
-        'status': 're-registered member', // Status for re-registered member
         'weight': memberData['weight'], // Weight
+        'status': 're-registered member', // Status for re-registered member
+        'phoneNumber': memberData['phoneNumber'], // Phone Number
+        'paymentMethod': memberData['paymentMethod'], // Payment Method
+        'paymentImageUrl': memberData['paymentImageUrl'], // Payment Image URL
+        'profileImageUrl': memberData['profileImageUrl'], // Profile Image URL
+        'remaining': memberData['remaining'], // Remaining amount
         'registerDate':
             memberData['registerDate'], // Include register date in report
       };
 
-      // Add the report to the "reporte" collection under the new member's unique ID
-      await _reporteRef.child(memberId).set(reportData);
+      // Update the report in the top-level "reporte" collection using the SAME memberId
+      await _reporteRef.child(memberId).update(reportData);
 
       print(
-          'Member updated successfully in "members" and report added to "reporte" under member ID.');
+          'Member updated successfully in "members" and report added to top-level "reporte".');
     } catch (e) {
       _handleError("update member", e); // Handle any errors that occur
     }

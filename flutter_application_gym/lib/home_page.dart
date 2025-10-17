@@ -8,11 +8,21 @@ import 'screens/active_page.dart';
 import 'screens/inactive_page.dart';
 import 'login_page.dart'; // Import your login page
 import 'screens/reporter.dart';
+import 'screens/signup_page.dart'; // Import the signup page
+import 'screens/membership_management_page.dart'; // Import membership management page
+import 'utils/reliable_text_widget.dart';
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
+  const MyHomePage({
+    super.key, 
+    required this.title,
+    required this.userRole,
+    required this.userName,
+  });
 
   final String title;
+  final String userRole;
+  final String userName;
 
   @override
   _MyHomePageState createState() => _MyHomePageState();
@@ -24,8 +34,6 @@ class _MyHomePageState extends State<MyHomePage> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   int _currentImageIndex = 0;
   late Timer _timer;
-  String _userName = ""; // Variable to hold user's name
-  bool isAdmin = false; // Variable to check if the user is an admin
   bool _isMounted = false;
 
   final List<String> _imagePaths = [
@@ -43,10 +51,8 @@ class _MyHomePageState extends State<MyHomePage> {
   void initState() {
     super.initState();
     _isMounted = true;
-    _checkAuthentication();
     _fetchActiveMembersCount();
     _startSlideshow();
-    _fetchUserName(); // Fetch the user's name and role
   }
 
   void _startSlideshow() {
@@ -64,39 +70,10 @@ class _MyHomePageState extends State<MyHomePage> {
     super.dispose();
   }
 
-  Future<void> _checkAuthentication() async {
-    User? user = _auth.currentUser;
-    if (user == null) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const LoginPage()),
-      );
-    }
-  }
 
-  Future<void> _fetchUserName() async {
-    User? user = _auth.currentUser;
-    if (user != null) {
-      final userRef = FirebaseDatabase.instance
-          .ref("members/${user.email!.replaceAll('.', '_')}");
-
-      final snapshot = await userRef.once();
-
-      if (snapshot.snapshot.exists) {
-        if (_isMounted) {
-          // Check if still mounted
-          setState(() {
-            _userName = snapshot.snapshot.child('name').value as String;
-            isAdmin =
-                snapshot.snapshot.child('role').value as String == 'admin';
-          });
-        }
-      } else {
-        print("User data does not exist.");
-      }
-    } else {
-      print("No user is currently signed in.");
-    }
-  }
+  // Getter methods for role and user name
+  bool get isAdmin => widget.userRole == 'admin';
+  String get _userName => widget.userName;
 
   Future<void> _fetchActiveMembersCount() async {
     try {
@@ -137,49 +114,86 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    double screenWidth = MediaQuery.of(context).size.width;
+    bool isMobile = screenWidth < 600;
+    
     return Scaffold(
       appBar: AppBar(
         title: Row(
           children: [
-            Image.asset('assets/logo.png', height: 40),
-            const SizedBox(width: 8),
-            Text(
-              widget.title,
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.deepPurpleAccent,
-                shadows: [
-                  Shadow(
-                      color: Colors.red, offset: Offset(1, 1), blurRadius: 3),
-                  Shadow(
-                      color: Colors.blue,
-                      offset: Offset(-1, -1),
-                      blurRadius: 3),
-                ],
+            Image.asset('assets/logo.png', height: isMobile ? 30 : 40),
+            SizedBox(width: isMobile ? 4 : 8),
+            Flexible(
+              child: Text(
+                widget.title,
+                style: TextStyle(
+                  fontSize: isMobile ? 16 : 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.deepPurpleAccent,
+                  shadows: [
+                    Shadow(
+                        color: Colors.red, offset: Offset(1, 1), blurRadius: 3),
+                    Shadow(
+                        color: Colors.blue,
+                        offset: Offset(-1, -1),
+                        blurRadius: 3),
+                  ],
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
         ),
         actions: [
-          // Show user name at the top right
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Text(
-              _userName.isNotEmpty
-                  ? _userName
-                  : "User", // Fallback if user name is empty
-              style: TextStyle(
-                  color: const Color.fromARGB(255, 225, 68, 68),
-                  fontWeight: FontWeight.bold),
+          // Show user name at the top right (hide on very small screens)
+          if (screenWidth > 400)
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: isMobile ? 8.0 : 16.0),
+              child: Center(
+                child: Text(
+                  _userName.isNotEmpty
+                      ? _userName
+                      : "User", // Fallback if user name is empty
+                  style: TextStyle(
+                      color: const Color.fromARGB(255, 225, 68, 68),
+                      fontWeight: FontWeight.bold,
+                      fontSize: isMobile ? 12 : 14),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ),
-          ),
+          // Only show signup button for non-admin users
+          if (!isAdmin)
+            IconButton(
+              icon: Icon(Icons.person_add, size: isMobile ? 20 : 24),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const SignupPage(),
+                  ),
+                );
+              },
+              tooltip: 'Create New Account',
+            ),
+          // Only show membership management for non-admin users
+          if (!isAdmin)
+            IconButton(
+              icon: Icon(Icons.settings, size: isMobile ? 20 : 24),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const MembershipManagementPage(),
+                  ),
+                );
+              },
+              tooltip: 'Manage Memberships',
+            ),
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: Icon(Icons.refresh, size: isMobile ? 20 : 24),
             onPressed: _fetchActiveMembersCount, // Refresh member count
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: Icon(Icons.logout, size: isMobile ? 20 : 24),
             onPressed: _signOut,
           ),
         ],
@@ -211,14 +225,17 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Widget _buildMainCard(int activeCount) {
+    double screenWidth = MediaQuery.of(context).size.width;
+    bool isMobile = screenWidth < 600;
+    
     return Card(
       elevation: 8,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(15),
       ),
       child: Container(
-        padding: const EdgeInsets.all(15),
-        width: MediaQuery.of(context).size.width * 0.75,
+        padding: EdgeInsets.all(isMobile ? 12 : 15),
+        width: MediaQuery.of(context).size.width * (isMobile ? 0.85 : 0.75),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(15),
           color: Colors.white.withOpacity(0.135),
@@ -228,12 +245,18 @@ class _MyHomePageState extends State<MyHomePage> {
           children: [
             Text(
               'Active Members',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: isMobile ? 16 : 20,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-            const SizedBox(height: 5),
+            SizedBox(height: isMobile ? 3 : 5),
             Text(
               '$activeCount',
-              style: TextStyle(fontSize: 36, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                fontSize: isMobile ? 28 : 36,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ],
         ),
@@ -295,13 +318,29 @@ class _MyHomePageState extends State<MyHomePage> {
           ],
         ),
         const SizedBox(height: 10), // Add spacing between rows
-        _buildButtonCard('Inactive Members', Icons.cancel, () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => const InactivePage(),
-            ),
-          );
-        }),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildButtonCard('Inactive Members', Icons.cancel, () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const InactivePage(),
+                ),
+              );
+            }),
+            // Only show Create Account button for non-admin users
+            if (!isAdmin) ...[
+              const SizedBox(width: 10),
+              _buildButtonCard('Create Account', Icons.person_add, () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const SignupPage(),
+                  ),
+                );
+              }),
+            ],
+          ],
+        ),
       ],
     );
   }
@@ -319,6 +358,15 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Widget _buildButtonCard(String label, IconData icon, VoidCallback onPressed) {
+    double screenWidth = MediaQuery.of(context).size.width;
+    bool isMobile = screenWidth < 600;
+    
+    // Calculate responsive sizes
+    double cardWidth = isMobile ? (screenWidth * 0.4) : 150;
+    double cardHeight = isMobile ? 100 : 120;
+    double iconSize = isMobile ? 35 : 50;
+    double fontSize = isMobile ? 12 : 16;
+    
     return Card(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(15),
@@ -327,8 +375,8 @@ class _MyHomePageState extends State<MyHomePage> {
       child: InkWell(
         onTap: onPressed,
         child: Container(
-          width: 150,
-          height: 120,
+          width: cardWidth,
+          height: cardHeight,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(15),
             color: Colors.blueAccent.withOpacity(0.8),
@@ -336,15 +384,20 @@ class _MyHomePageState extends State<MyHomePage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 50, color: Colors.white),
-              const SizedBox(height: 10),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
+              Icon(icon, size: iconSize, color: Colors.white),
+              SizedBox(height: isMobile ? 5 : 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
