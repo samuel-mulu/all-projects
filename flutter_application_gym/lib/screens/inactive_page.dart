@@ -254,6 +254,114 @@ class _InactivePageState extends State<InactivePage> {
     return dateStr;
   }
 
+  // Delete member from database
+  Future<void> _deleteMember(String memberId, String fullName) async {
+    // Show confirmation dialog
+    bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning, color: Colors.red, size: 28),
+            SizedBox(width: 8),
+            Text('Delete Member?'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to permanently delete this member?',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Member: $fullName', style: TextStyle(fontWeight: FontWeight.w600)),
+                  SizedBox(height: 4),
+                  Text('ID: $memberId', style: TextStyle(fontSize: 12, fontFamily: 'monospace')),
+                ],
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              '⚠️ This action cannot be undone!',
+              style: TextStyle(
+                color: Colors.red.shade700,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Note: This only deletes from the members path. Report history will be preserved.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade700,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.grey.shade700,
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Delete'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        // Delete member from members path
+        await _databaseRef.child(memberId).remove();
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Member deleted successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        
+        // Refresh the list
+        _fetchInactiveMembers();
+        
+        print('✅ Deleted member: $fullName (ID: $memberId)');
+      } catch (error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error deleting member: $error'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
+          ),
+        );
+        print('❌ Error deleting member: $error');
+      }
+    }
+  }
+
   Future<void> _reRegister(
       String memberId,
       String fullName,
@@ -286,7 +394,7 @@ class _InactivePageState extends State<InactivePage> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            return AlertDialog(
+        return AlertDialog(
           title: Text('Re-register Member: $fullName'),
           content: SingleChildScrollView(
             child: Column(
@@ -390,14 +498,14 @@ class _InactivePageState extends State<InactivePage> {
               ],
             ),
           ),
-              actions: [
-                TextButton(
+          actions: [
+            TextButton(
                   onPressed: _isRegistering ? null : () {
-                    Navigator.of(context).pop();
-                  },
-                  child: Text('Cancel'),
-                ),
-                ElevatedButton(
+                Navigator.of(context).pop();
+              },
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
                   onPressed: _isRegistering ? null : () async {
                     // Set registering state
                     setState(() {
@@ -576,13 +684,13 @@ class _InactivePageState extends State<InactivePage> {
                     'profileImageUrl': member['profileImageUrl'],
                     'lockerKey': member['lockerKey'],
                     'phoneNumber': member['phoneNumber'],
-                    'registerDate': newRegisterDate != null
-                        ? '${newRegisterDate.year}-${newRegisterDate.month.toString().padLeft(2, '0')}-${newRegisterDate.day.toString().padLeft(2, '0')}'
-                        : '',
-                    'weight': int.tryParse(newWeightStr) ?? 0,
+                  'registerDate': newRegisterDate != null
+                      ? '${newRegisterDate.year}-${newRegisterDate.month.toString().padLeft(2, '0')}-${newRegisterDate.day.toString().padLeft(2, '0')}'
+                      : '',
+                  'weight': int.tryParse(newWeightStr) ?? 0,
                     'remaining': _remaining,
-                    'membership': _membership,
-                    'duration': _duration,
+                  'membership': _membership,
+                  'duration': _duration,
                     'paymentMethod': _paymentMethod,
                     'paymentImageUrl': _paymentImageUrl,
                     'status': 'active',
@@ -651,7 +759,7 @@ class _InactivePageState extends State<InactivePage> {
                     backgroundColor: Colors.red,
                   ));
                 }
-                  },
+              },
                   child: _isRegistering
                     ? Row(
                         mainAxisSize: MainAxisSize.min,
@@ -780,8 +888,11 @@ class _InactivePageState extends State<InactivePage> {
                                       ],
                                     ),
                                   ),
+                                  // Action buttons column
+                                  Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
                                   // Re-register Button
-                                  const SizedBox(width: 10),
                                   ElevatedButton(
                                     onPressed: isAdmin
                                         ? () {
@@ -791,13 +902,36 @@ class _InactivePageState extends State<InactivePage> {
                                               member['weight']?.toString() ?? 'N/A',
                                               member['membership'] ?? 'Standard',
                                               member['duration'] ?? '1 Month',
-                                              _formatDate(member['registerDate']),
+                                                  _formatDate(member['registerDate']),
                                               member, // Add member parameter
                                             );
                                           }
                                         : null, // Disable the button if the user is not an admin
-                                    child:
-                                        Text(isAdmin ? 'Re-register' : 'No Access'),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.deepPurple,
+                                          foregroundColor: Colors.white,
+                                        ),
+                                        child: Text(isAdmin ? 'Re-register' : 'No Access'),
+                                      ),
+                                      SizedBox(height: 8),
+                                      // Delete Button (Red)
+                                      ElevatedButton.icon(
+                                        onPressed: isAdmin
+                                            ? () {
+                                                _deleteMember(
+                                                  member['id'] ?? 'Unknown ID',
+                                                  '${member['firstName'] ?? 'Unknown'} ${member['lastName'] ?? 'Unknown'}',
+                                                );
+                                              }
+                                            : null,
+                                        icon: Icon(Icons.delete_forever, size: 20),
+                                        label: Text('Delete'),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.red,
+                                          foregroundColor: Colors.white,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),

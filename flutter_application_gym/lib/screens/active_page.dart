@@ -15,6 +15,8 @@ class _ActivePageState extends State<ActivePage>
     with SingleTickerProviderStateMixin {
   final DatabaseReference _databaseRef =
       FirebaseDatabase.instance.ref('members');
+  final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey = 
+      GlobalKey<ScaffoldMessengerState>(); // Key for isolated notifications
   List<Map<String, dynamic>> activeMembers = [];
   List<Map<String, dynamic>> filteredMembers = [];
   bool _isLoading = true;
@@ -202,12 +204,27 @@ class _ActivePageState extends State<ActivePage>
   }
 
   void _notifyExpiry(String firstName, String lastName) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$firstName $lastName\'s package has expired.'),
-        backgroundColor: Colors.red,
-      ),
-    );
+    // Only show notification if this page is still mounted and visible
+    if (mounted && _scaffoldMessengerKey.currentState != null) {
+      // Use the page's ScaffoldMessenger key to ensure notification only shows on Active page
+      _scaffoldMessengerKey.currentState!.showSnackBar(
+        SnackBar(
+          content: Text('🔴 $firstName $lastName\'s package has expired.'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3), // Auto-dismiss after 3 seconds
+          behavior: SnackBarBehavior.floating, // Floating style
+          margin: EdgeInsets.only(bottom: 20, left: 20, right: 20), // Bottom margin
+          action: SnackBarAction(
+            label: 'OK',
+            textColor: Colors.white,
+            onPressed: () {
+              // Dismiss notification
+              _scaffoldMessengerKey.currentState!.hideCurrentSnackBar();
+            },
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _moveToInactivePage(String memberId) async {
@@ -662,11 +679,13 @@ class _ActivePageState extends State<ActivePage>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Active Members'),
-        backgroundColor: Colors.deepPurple,
-      ),
+    return ScaffoldMessenger(
+      key: _scaffoldMessengerKey, // Isolated notification system
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Active Members'),
+          backgroundColor: Colors.deepPurple,
+        ),
       body: Column(
         children: [
           // Search bar
@@ -875,6 +894,7 @@ class _ActivePageState extends State<ActivePage>
           ),
         ],
       ),
+      ), // Close ScaffoldMessenger
     );
   }
 
