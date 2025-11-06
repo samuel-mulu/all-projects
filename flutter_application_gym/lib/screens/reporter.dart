@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../utils/reliable_text_widget.dart';
 import '../utils/reliable_state_mixin.dart';
+import '../utils/duration_helper.dart';
 
 class AmountDisplayWidget extends StatefulWidget {
   final bool showAmount;
@@ -82,21 +83,22 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
   int _netPaidAmount = 0; // Total paid minus remaining
   Map<String, int> _paymentMethodStats = {};
   bool _showTotalAmount = false;
-  Map<String, int> _membershipPrices = {}; // Dynamic membership prices from database
+  // Removed membership prices - now using DurationHelper
   StreamSubscription<DatabaseEvent>? _reporteSubscription; // Live update listener
   bool _isRefreshing = false; // Refresh indicator
-  
+
   // Pagination variables
   int _currentPage = 1;
   final int _itemsPerPage = 20; // Load 20 reports at a time
   bool _hasMore = true;
   bool _isLoadingMore = false;
 
-  static const Map<String, int> membershipPrices = {
-    "Standard": 500,
-    "Premium": 700,
-    "VIP": 1500,
-  };
+  // Search variables
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+  bool _showSearchBar = false;
+
+  // Removed static membership prices - now using DurationHelper
 
   static const Map<int, String> ethiopianMonths = {
     1: "መስከረም",
@@ -119,13 +121,13 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
   @override
   void initState() {
     super.initState();
-    _fetchMembershipPrices();
     _setupLiveUpdates(); // Setup real-time listener
   }
 
   @override
   void dispose() {
     _reporteSubscription?.cancel(); // Cancel listener when page is disposed
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -179,6 +181,7 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
             reportData['remaining'] = reportData['remaining'] ?? 0;
             reportData['profileImageUrl'] = reportData['profileImageUrl'] ?? '';
             
+            // Keep all reports including pending deletions
             reportsList.add(reportData);
           }
         });
@@ -225,9 +228,6 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
       _isRefreshing = true;
     });
     
-    // Fetch membership prices again
-    await _fetchMembershipPrices();
-    
     // Trigger a re-fetch by reading the data once
     try {
       final DatabaseReference reporteRef = FirebaseDatabase.instance.ref('reporte');
@@ -248,46 +248,6 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
           duration: Duration(seconds: 2),
         ),
       );
-    }
-  }
-
-  // Fetch membership prices from database
-  Future<void> _fetchMembershipPrices() async {
-    try {
-      final DatabaseReference membershipsRef = FirebaseDatabase.instance.ref('memberships');
-      final DatabaseEvent event = await membershipsRef.once();
-      
-      Map<String, int> prices = {};
-      
-      // Add default prices
-      prices.addAll(membershipPrices);
-      
-      if (event.snapshot.value != null) {
-        final Map<dynamic, dynamic> membershipsMap = event.snapshot.value as Map<dynamic, dynamic>;
-        
-        membershipsMap.forEach((key, value) {
-          if (value is Map) {
-            Map<String, dynamic> membership = Map<String, dynamic>.from(value);
-            String name = membership['name'] ?? '';
-            int price = membership['price'] ?? 0;
-            if (name.isNotEmpty && price > 0) {
-              prices[name] = price;
-            }
-          }
-        });
-      }
-      
-      setState(() {
-        _membershipPrices = prices;
-      });
-      
-      print('Loaded membership prices: $_membershipPrices');
-    } catch (e) {
-      print('Error fetching membership prices: $e');
-      // Use default prices if fetch fails
-      setState(() {
-        _membershipPrices = Map.from(membershipPrices);
-      });
     }
   }
 
@@ -338,6 +298,7 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
             // Fetch and store profile image URL if available
             reportData['profileImageUrl'] = reportData['profileImageUrl'] ?? '';
             
+            // Keep all reports including pending deletions
             reportsList.add(reportData);
           }
         });
@@ -407,20 +368,17 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
   }
 
   int _calculateTotalPrice(Map<String, dynamic> member) {
-    String membershipType = member['membership'] ?? "Unknown";
-    // Use dynamic prices first, fallback to static prices
-    int pricePerMonth = _membershipPrices[membershipType] ?? membershipPrices[membershipType] ?? 0;
-    String? durationString = member['duration'];
-    int durationMonths = 1;
+    // Prefer stored price if available (saved at registration/update time)
+    final dynamic price = member['price'];
+    if (price is int) return price;
+    if (price is num) return price.toInt();
 
+    // Fallback to duration-based pricing
+    final String? durationString = member['duration'];
     if (durationString != null && durationString.isNotEmpty) {
-      int? extractedMonths = int.tryParse(durationString.split(' ')[0]);
-      if (extractedMonths != null) {
-        durationMonths = extractedMonths;
-      }
+      return DurationHelper.getDurationPrice(durationString);
     }
-
-    return pricePerMonth * durationMonths;
+    return DurationHelper.getDurationPrice('1 Month');
   }
 
   String _convertToEthiopianDate(String registerDate) {
@@ -429,6 +387,23 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
     int ethDay = date.day;
     String ethMonthName = ethiopianMonths[ethMonth] ?? "Unknown Month";
     return "${date.year} $ethMonthName $ethDay";
+  }
+
+  void _filterMembersByName(String query) {
+    forceReliableUpdate(() {
+      if (query.isEmpty) {
+        filteredList = List.from(membersList);
+      } else {
+        filteredList = membersList.where((member) {
+          String fullName = member['fullName'] ?? '';
+          return fullName.toLowerCase().contains(query.toLowerCase());
+        }).toList();
+      }
+      // Reset pagination when filtering
+      _currentPage = 1;
+      _hasMore = filteredList.length > _itemsPerPage;
+      print('Filtered by name: ${filteredList.length} members');
+    });
   }
 
   void _filterMembersByMonth() {
@@ -481,11 +456,11 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
     } else {
       // Default: Show actual paid amounts
       _totalPaidAmount = _calculateTotalPaidAmount(filteredList);
-      _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
+    _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
     }
     
     _netPaidAmount = _calculateNetPaidAmount(filteredList);
-    _paymentMethodStats = _calculatePaymentMethodStats(filteredList);
+      _paymentMethodStats = _calculatePaymentMethodStats(filteredList);
     
     print('Applied remaining filter: ${filteredList.length} members');
     print('Filter: $_selectedRemainingFilter');
@@ -536,6 +511,172 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
     }
   }
 
+  // Request deletion - Mark as pending for user approval
+  Future<void> _requestDeletion(String reportId, String fullName) async {
+    bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.delete_outline, color: Colors.orange, size: 28),
+            SizedBox(width: 8),
+            Text('Request Deletion?'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Mark this report for deletion?'),
+            SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade200),
+              ),
+              child: Text(
+                fullName,
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'This will be sent to User for approval before deletion.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Request Delete'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        // Mark as pending deletion
+        await FirebaseDatabase.instance.ref('reporte/$reportId').update({
+          'deleteStatus': 'pending_delete',
+          'deleteRequestedAt': DateTime.now().toIso8601String(),
+          'deleteRequestedBy': 'Admin',
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Deletion request sent for approval'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+
+        // Refresh to show pending status
+        _fetchReportsData();
+        print('✅ Requested deletion for: $fullName (ID: $reportId)');
+      } catch (error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error requesting deletion: $error'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // Cancel deletion request - Remove pending status
+  Future<void> _cancelDeletionRequest(String reportId, String fullName) async {
+    bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.undo, color: Colors.blue, size: 28),
+            SizedBox(width: 8),
+            Text('Cancel Deletion?'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Cancel deletion request for:'),
+            SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Text(
+                fullName,
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'This will restore the report to normal status.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('No'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Cancel Request'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        // Remove pending deletion status
+        await FirebaseDatabase.instance.ref('reporte/$reportId').update({
+          'deleteStatus': null,
+          'deleteRequestedAt': null,
+          'deleteRequestedBy': null,
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Deletion request cancelled'),
+            backgroundColor: Colors.blue,
+          ),
+        );
+
+        // Refresh to show updated status
+        _fetchReportsData();
+        print('✅ Cancelled deletion request for: $fullName (ID: $reportId)');
+      } catch (error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error cancelling request: $error'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   // Function to update remaining amount for a member
   void _updateRemaining(String memberId, String fullName, int currentRemaining, Map<String, dynamic> memberData) async {
     TextEditingController remainingController =
@@ -546,19 +687,19 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
     
     // Calculate maximum allowed remaining amount
     int maxRemaining = 0;
-    String membershipType = memberData['membership'] ?? "Standard";
-    String? durationString = memberData['duration'];
-    int durationMonths = 1;
-
-    if (durationString != null && durationString.isNotEmpty) {
-      int? extractedMonths = int.tryParse(durationString.split(' ')[0]);
-      if (extractedMonths != null) {
-        durationMonths = extractedMonths;
+    final dynamic storedPrice = memberData['price'];
+    if (storedPrice is int) {
+      maxRemaining = storedPrice;
+    } else if (storedPrice is num) {
+      maxRemaining = storedPrice.toInt();
+    } else {
+      String? durationString = memberData['duration'];
+      if (durationString != null && durationString.isNotEmpty) {
+      maxRemaining = DurationHelper.getDurationPrice(durationString);
+    } else {
+      maxRemaining = DurationHelper.getDurationPrice('1 Month'); // Default
       }
     }
-    
-    int pricePerMonth = _membershipPrices[membershipType] ?? membershipPrices[membershipType] ?? 0;
-    maxRemaining = pricePerMonth * durationMonths;
 
     showDialog(
       context: context,
@@ -566,7 +707,7 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setState) {
-            return AlertDialog(
+        return AlertDialog(
           title: Text('Update Remaining Amount'),
           content: SingleChildScrollView(
             child: Column(
@@ -594,14 +735,14 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
               ],
             ),
           ),
-              actions: [
-                TextButton(
+          actions: [
+            TextButton(
                   onPressed: _isUpdating ? null : () {
-                    Navigator.of(context).pop();
-                  },
-                  child: Text('Cancel'),
-                ),
-                ElevatedButton(
+                Navigator.of(context).pop();
+              },
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
                   onPressed: _isUpdating ? null : () {
                     // Set updating state
                     setState(() {
@@ -621,14 +762,14 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
                   return;
                 }
                 
-                // Check if remaining amount exceeds membership price
+                // Check if remaining amount exceeds duration price
                 if (maxRemaining > 0 && _remaining! > maxRemaining) {
                   setState(() {
                     _isUpdating = false;
                   });
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Remaining amount cannot exceed membership price ($maxRemaining Birr)'),
+                      content: Text('Remaining amount cannot exceed duration price ($maxRemaining Birr)'),
                       backgroundColor: Colors.red,
                     ),
                   );
@@ -678,7 +819,7 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
                     ),
                   );
                 });
-                  },
+              },
                   child: _isUpdating
                     ? Row(
                         mainAxisSize: MainAxisSize.min,
@@ -823,6 +964,28 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
           ],
         ),
         actions: [
+          // Search icon button
+          IconButton(
+            icon: Icon(
+              Icons.search,
+              color: Colors.amber,
+              size: 28,
+            ),
+            onPressed: () {
+              forceReliableUpdate(() {
+                _showSearchBar = !_showSearchBar;
+                if (!_showSearchBar) {
+                  _searchController.clear();
+                  _searchQuery = '';
+                  filteredList = List.from(membersList);
+                  // Reset pagination
+                  _currentPage = 1;
+                  _hasMore = filteredList.length > _itemsPerPage;
+                }
+              });
+            },
+            tooltip: 'Search by Name',
+          ),
           // Refresh icon button
           IconButton(
             icon: Icon(
@@ -924,6 +1087,25 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
                               ),
                             ),
                       const SizedBox(height: 8),
+                      // Search bar (shown when search icon clicked)
+                      if (_showSearchBar) ...[
+                        TextField(
+                          controller: _searchController,
+                          decoration: InputDecoration(
+                            hintText: 'Search by name...',
+                            prefixIcon: Icon(Icons.search),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            filled: true,
+                            fillColor: Colors.white,
+                          ),
+                          onChanged: (value) {
+                            _filterMembersByName(value);
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                      ],
                       // Filters Row - Responsive Layout
                       LayoutBuilder(
                         builder: (context, constraints) {
@@ -1081,13 +1263,19 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
                       String ethiopianRegisterDate =
                           _convertToEthiopianDate(member['registerDate']);
                       
+                      // Check if pending deletion
+                      bool isPendingDelete = member['deleteStatus'] == 'pending_delete';
 
                       return Card(
                         margin: EdgeInsets.all(8),
                         elevation: 10,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
+                          side: isPendingDelete 
+                            ? BorderSide(color: Colors.orange, width: 3)
+                            : BorderSide.none,
                         ),
+                        color: isPendingDelete ? Colors.orange.shade50 : null,
                         child: Padding(
                           padding: EdgeInsets.symmetric(
                             horizontal: 20,
@@ -1107,16 +1295,45 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
+                                    Row(
+                                  children: [
                                     Text(
                             "${index + 1}. ${member['fullName']}",
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 18,
                             ),
+                                        ),
+                                        // Pending badge
+                                        if (isPendingDelete) ...[
+                                          SizedBox(width: 8),
+                                          Container(
+                                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: Colors.orange,
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.pending, size: 14, color: Colors.white),
+                                                SizedBox(width: 4),
+                                                Text(
+                                                  'PENDING',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ],
                           ),
                                     const SizedBox(height: 8),
                               Text("Phone: ${member['phoneNumber']}"),
-                              Text("Membership: ${member['membership']}"),
                               Text("Duration: ${member['duration']}"),
                               Text("ቀሪ (Remaining): ${member['remaining']} Birr"),
                               Container(
@@ -1191,6 +1408,31 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
                                   },
                                   tooltip: 'View Payment Receipt',
                                     ),
+                              // Delete/Cancel button - Changes based on pending status
+                              if (isPendingDelete)
+                                // Cancel Request button (Blue) for pending deletions
+                                IconButton(
+                                  icon: Icon(Icons.undo, color: Colors.blue),
+                                  onPressed: () {
+                                    _cancelDeletionRequest(
+                                      member['reportId'] ?? member['memberId'],
+                                      member['fullName'] ?? 'Unknown',
+                                    );
+                                  },
+                                  tooltip: 'Cancel Deletion Request',
+                                )
+                              else
+                                // Delete button (Red) for normal reports
+                                IconButton(
+                                  icon: Icon(Icons.delete_forever, color: Colors.red),
+                                  onPressed: () {
+                                    _requestDeletion(
+                                      member['reportId'] ?? member['memberId'],
+                                      member['fullName'] ?? 'Unknown',
+                                    );
+                                  },
+                                  tooltip: 'Request Deletion',
+                                ),
                                 ],
                                 ),
                             ],

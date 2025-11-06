@@ -53,8 +53,10 @@ class _LoginPageState extends State<LoginPage>
       // Ensure persistence is enabled (should already be set in main.dart)
       if (!kIsWeb) {
         // For mobile, persistence is automatic
-        print('Mobile platform - Auth persistence is automatic');
       }
+      
+      // First, check if email exists in users database
+      await _validateUserInDatabase(_emailController.text.trim());
       
       UserCredential userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
@@ -63,8 +65,6 @@ class _LoginPageState extends State<LoginPage>
       
       // Verify the user is actually signed in
       if (userCredential.user != null) {
-        print('Login successful for user: ${userCredential.user!.email}');
-        
         // Show success message
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -84,7 +84,6 @@ class _LoginPageState extends State<LoginPage>
           
           // Always force navigation after successful login to ensure it works
           if (mounted) {
-            print('Login - Navigating to dashboard');
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
                 builder: (context) => const RoleBasedRouter(),
@@ -96,28 +95,26 @@ class _LoginPageState extends State<LoginPage>
         throw Exception('User credential is null after successful login');
       }
     } on FirebaseAuthException catch (e) {
-      print('Firebase Auth Error: ${e.code} - ${e.message}');
       // Handle specific Firebase Auth errors
       if (mounted) {
-      setState(() {
+        setState(() {
           _errorMessage = _getFirebaseErrorMessage(e.code);
-      });
+        });
       }
     } catch (e) {
-      print('General Error: $e');
-      // Handle any other errors
+      // Handle database validation and other errors
       if (mounted) {
-      setState(() {
-        _errorMessage = "An error occurred. Please try again.";
-      });
+        setState(() {
+          _errorMessage = e.toString().replaceFirst('Exception: ', '');
+        });
       }
     } finally {
       if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
-  }
   }
 
   String _getFirebaseErrorMessage(String errorCode) {
@@ -136,6 +133,45 @@ class _LoginPageState extends State<LoginPage>
         return 'Network error. Please check your connection.';
       default:
         return 'Login failed. Please try again.';
+    }
+  }
+
+  // Validate if user exists in Firebase Database users path
+  Future<void> _validateUserInDatabase(String email) async {
+    try {
+      // Try different possible user database paths
+      final List<String> possiblePaths = ['users', 'userAccounts', 'accounts'];
+      bool userFound = false;
+      
+      for (String path in possiblePaths) {
+        try {
+          final DatabaseReference usersRef = FirebaseDatabase.instance.ref(path);
+          final DatabaseEvent event = await usersRef.once();
+          
+          if (event.snapshot.value != null) {
+            final Map<dynamic, dynamic> usersMap = event.snapshot.value as Map<dynamic, dynamic>;
+            
+            // Check if email exists in any user record
+            for (var userData in usersMap.values) {
+              if (userData is Map && userData['email'] == email) {
+                userFound = true;
+                break;
+              }
+            }
+            
+            if (userFound) break;
+          }
+        } catch (e) {
+          continue; // Try next path
+        }
+      }
+      
+      if (!userFound) {
+        throw Exception('Email not found in system. Please contact administrator.');
+      }
+      
+    } catch (e) {
+      throw Exception('Unable to verify user. Please check your connection and try again.');
     }
   }
 

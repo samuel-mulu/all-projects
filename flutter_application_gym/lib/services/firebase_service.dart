@@ -1,6 +1,8 @@
 import 'package:ethiopian_calendar/model/ethiopian_date.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:ethiopian_calendar/ethiopian_date_converter.dart'; // Correct import
+import '../utils/network_helper.dart';
+import '../utils/duration_helper.dart';
 
 class FirebaseService {
   final DatabaseReference _membersRef =
@@ -34,19 +36,31 @@ class FirebaseService {
       DatabaseReference newMemberRef = _membersRef.push();
       await newMemberRef.set(memberData); // Save the member data
 
+      // Compute price based on provided memberData price or duration
+      int price;
+      final dynamic providedPrice = memberData['price'];
+      if (providedPrice is int) {
+        price = providedPrice;
+      } else if (providedPrice is num) {
+        price = providedPrice.toInt();
+      } else {
+        final String durationString = (memberData['duration'] ?? '') as String;
+        price = DurationHelper.getDurationPrice(durationString);
+      }
+
       // Prepare report data for logging in "reporte"
       Map<String, dynamic> reportData = {
         'duration': memberData['duration'], // Duration
         'firstName': memberData['firstName'], // First Name
         'lastName': memberData['lastName'], // Last Name
         'lockerKey': memberData['lockerKey'], // Locker Key
-        'membership': memberData['membership'], // Membership type
         'status': 'registered member', // Status for new member registration
         'phoneNumber': memberData['phoneNumber'], // Phone Number
         'paymentMethod': memberData['paymentMethod'], // Payment Method
         'paymentImageUrl': memberData['paymentImageUrl'], // Payment Image URL
         'profileImageUrl': memberData['profileImageUrl'], // Profile Image URL
         'remaining': memberData['remaining'], // Remaining amount (ቀሪ)
+        'price': price, // Total price derived from duration at registration time
         // Register errors only tracked for active member updates, not re-registrations
         'registerDate':
             memberData['registerDate'], // Include register date in report
@@ -68,13 +82,23 @@ class FirebaseService {
       // Update the member data in the "members" collection
       await _membersRef.child(memberId).update(memberData);
 
+      // Compute price based on provided memberData price or duration
+      int price;
+      final dynamic providedPrice = memberData['price'];
+      if (providedPrice is int) {
+        price = providedPrice;
+      } else if (providedPrice is num) {
+        price = providedPrice.toInt();
+      } else {
+        final String durationString = (memberData['duration'] ?? '') as String;
+        price = DurationHelper.getDurationPrice(durationString);
+      }
       // Prepare report data for logging in "reporte"
       Map<String, dynamic> reportData = {
         'duration': memberData['duration'], // Duration
         'firstName': memberData['firstName'], // First Name
         'lastName': memberData['lastName'], // Last Name
         'lockerKey': memberData['lockerKey'], // Locker Key
-        'membership': memberData['membership'], // Membership type
         'weight': memberData['weight'], // Weight
         'status': 're-registered member', // Status for re-registered member
         'phoneNumber': memberData['phoneNumber'], // Phone Number
@@ -82,6 +106,7 @@ class FirebaseService {
         'paymentImageUrl': memberData['paymentImageUrl'], // Payment Image URL
         'profileImageUrl': memberData['profileImageUrl'], // Profile Image URL
         'remaining': memberData['remaining'], // Remaining amount
+        'price': price, // Total price derived from duration at update time
         'registerDate':
             memberData['registerDate'], // Include register date in report
       };
@@ -122,8 +147,7 @@ class FirebaseService {
 
   // Query to get active members
   Future<DatabaseEvent> getActiveMembers() async {
-    return _fetchData(
-        () => _membersRef.orderByChild('status').equalTo('active').once());
+    return _fetchData(() => _membersRef.once());
   }
 
   // Fetch all members and return as a list
@@ -151,7 +175,10 @@ class FirebaseService {
   Future<DatabaseEvent> _fetchData(
       Future<DatabaseEvent> Function() fetchFunction) async {
     try {
-      return await fetchFunction();
+      return await FirebaseHelper.fetchWithRetry(
+        fetchFunction,
+        operationName: "Firebase data fetch",
+      );
     } catch (e) {
       _handleError("fetch data", e);
       throw Exception("Failed to fetch data: $e");
@@ -160,7 +187,8 @@ class FirebaseService {
 
   void _handleError(String action, dynamic error) {
     print("Failed to $action: $error");
-    throw Exception("Failed to $action: $error");
+    String userMessage = FirebaseHelper.getErrorMessage(error);
+    throw Exception("Failed to $action: $userMessage");
   }
 
   getAllMembers() {}

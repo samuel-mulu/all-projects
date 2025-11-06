@@ -30,7 +30,6 @@ class _InactivePageState extends State<InactivePage> {
   String _userName = ''; // Store the user's name
   bool isAdmin = false; // Default to 'user'
   TextEditingController searchController = TextEditingController();
-  List<Map<String, dynamic>> _membershipTypes = []; // Dynamic membership types
   
   // Pagination variables
   int _currentPage = 1;
@@ -42,40 +41,10 @@ class _InactivePageState extends State<InactivePage> {
   void initState() {
     super.initState();
     _fetchCurrentUserRole();
-    _fetchMembershipTypes();
     _fetchInactiveMembers();
   }
 
-  // Fetch membership types from database
-  Future<void> _fetchMembershipTypes() async {
-    try {
-      final DatabaseReference membershipsRef = FirebaseDatabase.instance.ref('memberships');
-      final DatabaseEvent event = await membershipsRef.once();
-      
-      List<Map<String, dynamic>> loadedMemberships = [];
-      
-      if (event.snapshot.value != null) {
-        final Map<dynamic, dynamic> membershipsMap = event.snapshot.value as Map<dynamic, dynamic>;
-        
-        membershipsMap.forEach((key, value) {
-          if (value is Map) {
-            Map<String, dynamic> membership = Map<String, dynamic>.from(value);
-            membership['id'] = key;
-            loadedMemberships.add(membership);
-          }
-        });
-      }
-      
-      // Sort by name
-      loadedMemberships.sort((a, b) => (a['name'] ?? '').compareTo(b['name'] ?? ''));
 
-      setState(() {
-        _membershipTypes = loadedMemberships;
-      });
-    } catch (e) {
-      print('Error fetching membership types: $e');
-    }
-  }
 
   Future<void> _fetchCurrentUserRole() async {
     var _auth = FirebaseAuth.instance; // Initialize Firebase Auth
@@ -183,6 +152,64 @@ class _InactivePageState extends State<InactivePage> {
         });
       });
     }
+  }
+
+  // Map legacy duration values to current valid options
+  String _mapLegacyDuration(String duration) {
+    // Normalize the duration string for comparison
+    String normalizedDuration = duration.toLowerCase().trim();
+    
+    // Handle legacy duration formats
+    if (normalizedDuration.contains('0.5 month') || normalizedDuration.contains('0.5month')) {
+      return '2 Weeks';
+    }
+    if (normalizedDuration.contains('30 days') || normalizedDuration.contains('30days')) {
+      return '1 Month';
+    }
+    if (normalizedDuration.contains('60 days') || normalizedDuration.contains('60days')) {
+      return '2 Months';
+    }
+    if (normalizedDuration.contains('90 days') || normalizedDuration.contains('90days')) {
+      return '3 Months';
+    }
+    if (normalizedDuration.contains('180 days') || normalizedDuration.contains('180days')) {
+      return '6 Months';
+    }
+    if (normalizedDuration.contains('365 days') || normalizedDuration.contains('365days')) {
+      return '1 Year';
+    }
+    if (normalizedDuration.contains('14 days') || normalizedDuration.contains('14days')) {
+      return '2 Weeks';
+    }
+    
+    // Handle exact matches (case insensitive)
+    if (normalizedDuration == '2 weeks' || normalizedDuration == '2weeks') {
+      return '2 Weeks';
+    }
+    if (normalizedDuration == '1 month' || normalizedDuration == '1month') {
+      return '1 Month';
+    }
+    if (normalizedDuration == '2 months' || normalizedDuration == '2months') {
+      return '2 Months';
+    }
+    if (normalizedDuration == '3 months' || normalizedDuration == '3months') {
+      return '3 Months';
+    }
+    if (normalizedDuration == '6 months' || normalizedDuration == '6months') {
+      return '6 Months';
+    }
+    if (normalizedDuration == '1 year' || normalizedDuration == '1year') {
+      return '1 Year';
+    }
+    
+    // If it's already a valid duration, return as is
+    const validDurations = ['2 Weeks', '1 Month', '2 Months', '3 Months', '6 Months', '1 Year'];
+    if (validDurations.contains(duration)) {
+      return duration;
+    }
+    
+    // Default fallback
+    return '1 Month';
   }
 
   // Parse duration string to days
@@ -366,10 +393,29 @@ class _InactivePageState extends State<InactivePage> {
       String memberId,
       String fullName,
       String currentWeight,
-      String currentMembership,
       String currentDuration,
       String currentRegisterDate,
       Map<String, dynamic> member) async {
+    // Load durations dynamically from DB
+    List<Map<String, dynamic>> durationsList = [];
+    try {
+      final DatabaseReference durationsRef = FirebaseDatabase.instance.ref('durations');
+      final DatabaseEvent event = await durationsRef.once();
+      if (event.snapshot.value != null) {
+        final durationsMap = event.snapshot.value as Map<dynamic, dynamic>;
+        durationsMap.forEach((key, value) {
+          if (value is Map) {
+            durationsList.add({
+              'id': key,
+              'name': value['name'],
+              'price': value['price'],
+              'days': value['days'],
+            });
+          }
+        });
+      }
+      durationsList.sort((a, b) => (a['days'] ?? 0).compareTo(b['days'] ?? 0));
+    } catch (e) {}
     TextEditingController weightController =
         TextEditingController(text: currentWeight);
     TextEditingController registerDateController =
@@ -377,8 +423,8 @@ class _InactivePageState extends State<InactivePage> {
     TextEditingController remainingController =
         TextEditingController(text: member['remaining']?.toString() ?? '0');
 
-    String _membership = currentMembership;
-    String _duration = currentDuration;
+    // Map legacy duration values to current valid options
+    String? _duration = _mapLegacyDuration(currentDuration); // Preselect current duration
     int? _remaining = member['remaining'];
     String _paymentMethod = member['paymentMethod'] ?? 'CASH';
     File? _paymentImage;
@@ -431,46 +477,25 @@ class _InactivePageState extends State<InactivePage> {
                   ),
                 ),
 
-                // Membership dropdown
-                DropdownButtonFormField<String>(
-                  value: _membership,
-                  onChanged: (newValue) {
-                    setState(() {
-                      _membership = newValue!;
-                    });
-                  },
-                  items: _membershipTypes.isEmpty
-                      ? const [
-                          DropdownMenuItem(value: 'Standard', child: Text('Standard')),
-                          DropdownMenuItem(value: 'Premium', child: Text('Premium')),
-                          DropdownMenuItem(value: 'VIP', child: Text('VIP')),
-                        ]
-                      : _membershipTypes.map((membership) {
-                          return DropdownMenuItem<String>(
-                            value: membership['name'],
-                            child: Text('${membership['name']} (${membership['price']} Birr/Month)'),
-                          );
-                        }).toList(),
-                  decoration: InputDecoration(labelText: 'Membership'),
-                ),
-
                 // Duration dropdown
                 DropdownButtonFormField<String>(
                   value: _duration,
+                  hint: Text('Choose duration'),
                   onChanged: (newValue) {
                     setState(() {
-                      _duration = newValue!;
+                      _duration = newValue ?? _duration;
                     });
                   },
-                  items: const [
-                    DropdownMenuItem(value: '1 Month', child: Text('1 Month')),
-                    DropdownMenuItem(
-                        value: '2 Months', child: Text('2 Months')),
-                    DropdownMenuItem(
-                        value: '3 Months', child: Text('3 Months')),
-                    DropdownMenuItem(
-                        value: '6 Months', child: Text('6 Months')),
-                    DropdownMenuItem(value: '1 Year', child: Text('1 Year')),
+                  validator: (value) => (value == null || value.isEmpty) ? 'Please choose a duration' : null,
+                  items: durationsList.isNotEmpty
+                      ? durationsList
+                          .map<DropdownMenuItem<String>>((d) => DropdownMenuItem<String>(
+                                value: (d['name'] as String?) ?? '',
+                                child: Text((d['name'] as String?) ?? ''),
+                              ))
+                          .toList()
+                      : [
+                          DropdownMenuItem<String>(value: '', child: Text('No durations available')),
                   ],
                   decoration: InputDecoration(labelText: 'Duration'),
                 ),
@@ -608,32 +633,130 @@ class _InactivePageState extends State<InactivePage> {
                   return;
                 }
 
-                // Validate that the membership won't be expired immediately
-                // The date entered is in Ethiopian calendar format YYYY-MM-DD
-                // Convert to Gregorian for accurate expiry calculation
-                String ethiopianDateStr = '${newRegisterDate.year}-${newRegisterDate.month.toString().padLeft(2, '0')}-${newRegisterDate.day.toString().padLeft(2, '0')}';
-                DateTime gregorianRegisterDate;
-                
-                try {
-                  gregorianRegisterDate = _ethiopianToGregorian(ethiopianDateStr);
-                } catch (e) {
-                  print('Error converting Ethiopian date: $e');
-                  // If conversion fails, use the date as-is (fallback)
-                  gregorianRegisterDate = newRegisterDate;
-                }
-                
-                int durationDays = _parseDurationToDays(_duration);
-                DateTime expiryDate = gregorianRegisterDate.add(Duration(days: durationDays));
-                DateTime now = DateTime.now();
-                
-                if (expiryDate.isBefore(now)) {
+                // Validate duration selected
+                if (_duration == null || _duration!.isEmpty) {
                   setState(() {
                     _isRegistering = false;
                   });
-                  int daysExpired = now.difference(expiryDate).inDays;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Warning: This membership is already expired by $daysExpired days! Ethiopian date $ethiopianDateStr converts to ${gregorianRegisterDate.year}-${gregorianRegisterDate.month.toString().padLeft(2, '0')}-${gregorianRegisterDate.day.toString().padLeft(2, '0')} (Gregorian). Please choose a more recent date or longer duration.'),
+                      content: Text('Please choose a duration.'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+
+                // Validate that the membership won't be expired immediately
+                // The date entered is in Ethiopian calendar format YYYY-MM-DD
+                // Calculate expiry date using Ethiopian calendar
+                final parts = newRegisterDateStr.split('-');
+                if (parts.length != 3) {
+                  setState(() {
+                    _isRegistering = false;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('Invalid Ethiopian date format. Please use YYYY-MM-DD.'),
+                    backgroundColor: Colors.red,
+                  ));
+                  return;
+                }
+                
+                final year = int.parse(parts[0]);
+                final month = int.parse(parts[1]);
+                final day = int.parse(parts[2]);
+                
+                // Validate Ethiopian date ranges
+                if (year < 2000) {
+                  setState(() {
+                    _isRegistering = false;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('Year must be 2000 or later.'),
+                    backgroundColor: Colors.red,
+                  ));
+                  return;
+                }
+                
+                if (month < 1 || month > 13) {
+                  setState(() {
+                    _isRegistering = false;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('Month must be between 01 and 13 (Ethiopian calendar).'),
+                    backgroundColor: Colors.red,
+                  ));
+                  return;
+                }
+                
+                if (day < 1 || day > 30) {
+                  setState(() {
+                    _isRegistering = false;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('Day must be between 01 and 30.'),
+                    backgroundColor: Colors.red,
+                  ));
+                  return;
+                }
+                
+                // Create Ethiopian date for registration
+                final ethiopianRegisterDate = EthiopianDateTime(year, month, day);
+                
+                // Calculate expiry date in Ethiopian calendar
+                int durationDays = _parseDurationToDays(_duration!);
+                int remainingDays = durationDays;
+                
+                EthiopianDateTime ethiopianExpiryDate = ethiopianRegisterDate;
+                
+                // Add days to Ethiopian date
+                while (remainingDays > 0) {
+                  // Ethiopian months have 30 days each, except Pagume (13th month) which has 5 or 6 days
+                  int daysInCurrentMonth = (ethiopianExpiryDate.month == 13) ? 
+                    (ethiopianExpiryDate.year % 4 == 3 ? 6 : 5) : 30;
+                  
+                  int daysToAdd = remainingDays > daysInCurrentMonth ? daysInCurrentMonth : remainingDays;
+                  
+                  if (ethiopianExpiryDate.day + daysToAdd > daysInCurrentMonth) {
+                    // Move to next month
+                    if (ethiopianExpiryDate.month == 13) {
+                      ethiopianExpiryDate = EthiopianDateTime(ethiopianExpiryDate.year + 1, 1, daysToAdd - (daysInCurrentMonth - ethiopianExpiryDate.day));
+                    } else {
+                      ethiopianExpiryDate = EthiopianDateTime(ethiopianExpiryDate.year, ethiopianExpiryDate.month + 1, daysToAdd - (daysInCurrentMonth - ethiopianExpiryDate.day));
+                    }
+                  } else {
+                    ethiopianExpiryDate = EthiopianDateTime(ethiopianExpiryDate.year, ethiopianExpiryDate.month, ethiopianExpiryDate.day + daysToAdd);
+                  }
+                  
+                  remainingDays -= daysToAdd;
+                }
+                
+                // Get current Ethiopian date
+                DateTime now = DateTime.now();
+                final currentEthiopianDate = EthiopianDateConverter.convertToEthiopianDate(EthiopianDateTime(now.year, now.month, now.day));
+                
+                // Check if expiry date is in the past (Ethiopian calendar)
+                bool isExpired = false;
+                int daysExpired = 0;
+                
+                if (ethiopianExpiryDate.year < currentEthiopianDate.year ||
+                    (ethiopianExpiryDate.year == currentEthiopianDate.year && ethiopianExpiryDate.month < currentEthiopianDate.month) ||
+                    (ethiopianExpiryDate.year == currentEthiopianDate.year && ethiopianExpiryDate.month == currentEthiopianDate.month && ethiopianExpiryDate.day < currentEthiopianDate.day)) {
+                  isExpired = true;
+                  
+                  // Calculate days expired (approximate)
+                  DateTime expiryGregorian = EthiopianDateConverter.convertToGregorianDate(ethiopianExpiryDate);
+                  daysExpired = now.difference(expiryGregorian).inDays;
+                }
+                
+                if (isExpired) {
+                  setState(() {
+                    _isRegistering = false;
+                  });
+                  String ethiopianExpiryDateStr = '${ethiopianExpiryDate.year}-${ethiopianExpiryDate.month.toString().padLeft(2, '0')}-${ethiopianExpiryDate.day.toString().padLeft(2, '0')}';
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Warning: This duration expired on $ethiopianExpiryDateStr ($daysExpired days ago)! Please choose a more recent date or longer duration.'),
                       backgroundColor: Colors.orange,
                       duration: Duration(seconds: 6),
                     ),
@@ -642,13 +765,27 @@ class _InactivePageState extends State<InactivePage> {
                 }
                 
                 // Warn if membership will expire very soon (within 7 days)
-                int remainingDays = expiryDate.difference(now).inDays;
-                if (remainingDays <= 7) {
+                // But for 2 Weeks duration, use a lower threshold since it's a short-term membership
+                int remainingDaysUntilExpiry = 0;
+                
+                // Calculate remaining days until expiry (Ethiopian calendar)
+                if (ethiopianExpiryDate.year == currentEthiopianDate.year && 
+                    ethiopianExpiryDate.month == currentEthiopianDate.month) {
+                  remainingDaysUntilExpiry = ethiopianExpiryDate.day - currentEthiopianDate.day;
+                } else {
+                  // Convert to Gregorian for easier calculation
+                  DateTime expiryGregorian = EthiopianDateConverter.convertToGregorianDate(ethiopianExpiryDate);
+                  remainingDaysUntilExpiry = expiryGregorian.difference(now).inDays;
+                }
+                
+                int warningThreshold = (_duration == '2 Weeks') ? 3 : 7; // Lower threshold for 2 Weeks
+                if (remainingDaysUntilExpiry <= warningThreshold) {
+                  String ethiopianExpiryDateStr = '${ethiopianExpiryDate.year}-${ethiopianExpiryDate.month.toString().padLeft(2, '0')}-${ethiopianExpiryDate.day.toString().padLeft(2, '0')}';
                   bool? confirm = await showDialog<bool>(
                     context: context,
                     builder: (context) => AlertDialog(
-                      title: Text('Membership Expires Soon'),
-                      content: Text('Ethiopian date: $ethiopianDateStr\nGregorian date: ${gregorianRegisterDate.year}-${gregorianRegisterDate.month.toString().padLeft(2, '0')}-${gregorianRegisterDate.day.toString().padLeft(2, '0')}\n\nThis membership will expire in $remainingDays day(s). Are you sure you want to continue?'),
+                      title: Text('Duration Expires Soon'),
+                      content: Text('This duration will expire on $ethiopianExpiryDateStr (in $remainingDaysUntilExpiry day(s)).${_duration == '2 Weeks' ? '\n\nNote: 2 Weeks is a short-term duration.' : ''} Are you sure you want to continue?'),
                       actions: [
                         TextButton(
                           onPressed: () => Navigator.of(context).pop(false),
@@ -678,6 +815,16 @@ class _InactivePageState extends State<InactivePage> {
                   String newMemberId = newMemberRef.key!;
                   
                   // Prepare complete member data including all existing fields
+                  // Compute price from selected duration (DB list)
+                  int computedPrice = 0;
+                  try {
+                    final idx = durationsList.indexWhere((d) => (d['name'] as String?) == _duration);
+                    if (idx != -1) {
+                      final p = durationsList[idx]['price'];
+                      if (p is int) computedPrice = p; else if (p is num) computedPrice = p.toInt();
+                    }
+                  } catch (e) {}
+
                   Map<String, dynamic> completeMemberData = {
                     'firstName': member['firstName'],
                     'lastName': member['lastName'],
@@ -689,8 +836,8 @@ class _InactivePageState extends State<InactivePage> {
                       : '',
                   'weight': int.tryParse(newWeightStr) ?? 0,
                     'remaining': _remaining,
-                  'membership': _membership,
                   'duration': _duration,
+                    'price': computedPrice,
                     'paymentMethod': _paymentMethod,
                     'paymentImageUrl': _paymentImageUrl,
                     'status': 'active',
@@ -721,8 +868,8 @@ class _InactivePageState extends State<InactivePage> {
                     'registerDate': newRegisterDate != null
                         ? '${newRegisterDate.year}-${newRegisterDate.month.toString().padLeft(2, '0')}-${newRegisterDate.day.toString().padLeft(2, '0')}'
                         : '',
-                    'membership': _membership,
                     'duration': _duration,
+                    'price': computedPrice,
                     'paymentMethod': _paymentMethod,
                     'paymentImageUrl': _paymentImageUrl,
                     'profileImageUrl': member['profileImageUrl'],
@@ -876,8 +1023,6 @@ class _InactivePageState extends State<InactivePage> {
                                         ),
                                         const SizedBox(height: 8),
                                         Text(
-                                            'Membership: ${member['membership'] ?? 'N/A'}'),
-                                        Text(
                                             'Weight: ${member['weight'] ?? 'N/A'} kg'),
                                         Text(
                                             'Register Date: ${_formatDate(member['registerDate'])}'),
@@ -900,7 +1045,6 @@ class _InactivePageState extends State<InactivePage> {
                                               member['id'] ?? 'Unknown ID',
                                               '${member['firstName'] ?? 'Unknown'} ${member['lastName'] ?? 'Unknown'}',
                                               member['weight']?.toString() ?? 'N/A',
-                                              member['membership'] ?? 'Standard',
                                               member['duration'] ?? '1 Month',
                                                   _formatDate(member['registerDate']),
                                               member, // Add member parameter

@@ -1,181 +1,164 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'dart:async';
 import '../utils/reliable_state_mixin.dart';
 
-class MembershipManagementPage extends StatefulWidget {
-  const MembershipManagementPage({super.key});
+class DurationManagementPage extends StatefulWidget {
+  const DurationManagementPage({super.key});
 
   @override
-  _MembershipManagementPageState createState() => _MembershipManagementPageState();
+  _DurationManagementPageState createState() => _DurationManagementPageState();
 }
 
-class _MembershipManagementPageState extends State<MembershipManagementPage> with ReliableStateMixin {
-  final DatabaseReference _membershipsRef = FirebaseDatabase.instance.ref('memberships');
-  List<Map<String, dynamic>> membershipsList = [];
+class _DurationManagementPageState extends State<DurationManagementPage>
+    with ReliableStateMixin {
+  final DatabaseReference _durationsRef =
+      FirebaseDatabase.instance.ref('durations');
+  List<Map<String, dynamic>> durationsList = [];
   bool _isLoading = true;
+  StreamSubscription<DatabaseEvent>? _subscription; // Live sync subscription
 
   @override
   void initState() {
     super.initState();
-    _fetchMemberships();
+    _setupLiveSync();
   }
 
-  Future<void> _fetchMemberships() async {
-    try {
-      forceReliableUpdate(() {
-        _isLoading = true;
-      });
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
 
-      final DatabaseEvent event = await _membershipsRef.once();
-      
-      List<Map<String, dynamic>> loadedMemberships = [];
-      
+  void _setupLiveSync() {
+    _subscription = _durationsRef.onValue.listen((DatabaseEvent event) async {
+      // Static duration types with fixed structure
+      List<Map<String, dynamic>> staticDurations = [
+        {'name': '2 Weeks', 'price': 800, 'days': 14},
+        {'name': '1 Month', 'price': 1000, 'days': 30},
+        {'name': '2 Months', 'price': 1800, 'days': 60},
+        {'name': '3 Months', 'price': 2100, 'days': 90},
+        {'name': '6 Months', 'price': 4300, 'days': 180},
+        {'name': '1 Year', 'price': 6000, 'days': 365},
+      ];
+
       if (event.snapshot.value != null) {
-        final Map<dynamic, dynamic> membershipsMap = event.snapshot.value as Map<dynamic, dynamic>;
-        
-        membershipsMap.forEach((key, value) {
-          if (value is Map) {
-            Map<String, dynamic> membership = Map<String, dynamic>.from(value);
-            membership['id'] = key;
-            loadedMemberships.add(membership);
-          }
+        final Map<dynamic, dynamic> durationsMap =
+            event.snapshot.value as Map<dynamic, dynamic>;
+
+        // Update static durations with Firebase prices if they exist
+        for (var staticDuration in staticDurations) {
+          String durationName = staticDuration['name'];
+
+          // Find matching duration in Firebase by name
+          durationsMap.forEach((key, value) {
+            if (value is Map && value['name'] == durationName) {
+              staticDuration['id'] = key; // Add Firebase ID for updates
+              staticDuration['price'] = value['price'] ??
+                  staticDuration['price']; // Use Firebase price or default
+            }
+          });
+        }
+      } else {
+        // Initialize Firebase with static durations
+        await _initializeDefaultDurations();
+      }
+
+      // Sort by days
+      staticDurations
+          .sort((a, b) => (a['days'] ?? 0).compareTo(b['days'] ?? 0));
+
+      forceReliableUpdate(() {
+        durationsList = staticDurations;
+        _isLoading = false;
+      });
+    }, onError: (error) {
+      print('Error in live sync: $error');
+      forceReliableUpdate(() {
+        _isLoading = false;
+      });
+    });
+  }
+
+  Future<void> _fetchDurations() async {
+    // Keep for manual refresh if needed, but data comes from live stream
+    forceReliableUpdate(() {
+      _isLoading = true;
+    });
+  }
+
+  Future<void> _initializeDefaultDurations() async {
+    try {
+      // Static duration types with fixed prices
+      final List<Map<String, dynamic>> staticDurations = [
+        {'name': '2 Weeks', 'price': 800, 'days': 14},
+        {'name': '1 Month', 'price': 1000, 'days': 30},
+        {'name': '2 Months', 'price': 1800, 'days': 60},
+        {'name': '3 Months', 'price': 2100, 'days': 90},
+        {'name': '6 Months', 'price': 4300, 'days': 180},
+        {'name': '1 Year', 'price': 6000, 'days': 365},
+      ];
+
+      for (var duration in staticDurations) {
+        await _durationsRef.push().set({
+          'name': duration['name'],
+          'price': duration['price'],
+          'days': duration['days'],
+          'createdAt': DateTime.now().toIso8601String(),
         });
       }
-      
-      // Sort by name
-      loadedMemberships.sort((a, b) => (a['name'] ?? '').compareTo(b['name'] ?? ''));
-
-      forceReliableUpdate(() {
-        membershipsList = loadedMemberships;
-        _isLoading = false;
-      });
     } catch (e) {
-      print('Error fetching memberships: $e');
-      forceReliableUpdate(() {
-        _isLoading = false;
-      });
+      print('Error initializing default durations: $e');
     }
   }
 
-  Future<void> _addMembership() async {
-    TextEditingController nameController = TextEditingController();
-    TextEditingController priceController = TextEditingController();
+  // Add duration functionality removed - durations are static
+
+  Future<void> _editDuration(Map<String, dynamic> duration) async {
+    TextEditingController priceController =
+        TextEditingController(text: duration['price'].toString());
 
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Add Membership Type'),
+          title: Text('Edit Price for ${duration['name']}'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Membership Name',
-                    hintText: 'e.g., Gold, Platinum',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.label),
+                // Show duration info (read-only)
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade300),
                   ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: priceController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Price (Birr)',
-                    hintText: 'e.g., 1000',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.attach_money),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                String name = nameController.text.trim();
-                String priceStr = priceController.text.trim();
-                
-                if (name.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Please enter membership name'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                  return;
-                }
-                
-                int? price = int.tryParse(priceStr);
-                if (price == null || price <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Please enter a valid price'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                  return;
-                }
-
-                try {
-                  // Add to Firebase
-                  await _membershipsRef.push().set({
-                    'name': name,
-                    'price': price,
-                    'createdAt': DateTime.now().toIso8601String(),
-                  });
-
-                  Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Membership "$name" added successfully!'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                  _fetchMemberships(); // Refresh list
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Error adding membership: $e'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _editMembership(Map<String, dynamic> membership) async {
-    TextEditingController nameController = TextEditingController(text: membership['name']);
-    TextEditingController priceController = TextEditingController(text: membership['price'].toString());
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Edit Membership Type'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Membership Name',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.label),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.schedule, color: Colors.deepPurple),
+                          const SizedBox(width: 8),
+                          Text(
+                            duration['name'],
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Duration: ${duration['days']} days',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -198,19 +181,8 @@ class _MembershipManagementPageState extends State<MembershipManagementPage> wit
             ),
             ElevatedButton(
               onPressed: () async {
-                String name = nameController.text.trim();
                 String priceStr = priceController.text.trim();
-                
-                if (name.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Please enter membership name'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                  return;
-                }
-                
+
                 int? price = int.tryParse(priceStr);
                 if (price == null || price <= 0) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -223,9 +195,8 @@ class _MembershipManagementPageState extends State<MembershipManagementPage> wit
                 }
 
                 try {
-                  // Update in Firebase
-                  await _membershipsRef.child(membership['id']).update({
-                    'name': name,
+                  // Update only the price in Firebase
+                  await _durationsRef.child(duration['id']).update({
                     'price': price,
                     'updatedAt': DateTime.now().toIso8601String(),
                   });
@@ -233,21 +204,22 @@ class _MembershipManagementPageState extends State<MembershipManagementPage> wit
                   Navigator.of(context).pop();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Membership "$name" updated successfully!'),
+                      content: Text(
+                          'Price for "${duration['name']}" updated to $price Birr!'),
                       backgroundColor: Colors.green,
                     ),
                   );
-                  _fetchMemberships(); // Refresh list
+                  _fetchDurations(); // Refresh list
                 } catch (e) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Error updating membership: $e'),
+                      content: Text('Error updating price: $e'),
                       backgroundColor: Colors.red,
                     ),
                   );
                 }
               },
-              child: const Text('Update'),
+              child: const Text('Update Price'),
             ),
           ],
         );
@@ -255,61 +227,18 @@ class _MembershipManagementPageState extends State<MembershipManagementPage> wit
     );
   }
 
-  Future<void> _deleteMembership(Map<String, dynamic> membership) async {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Delete Membership'),
-          content: Text('Are you sure you want to delete "${membership['name']}"?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                try {
-                  await _membershipsRef.child(membership['id']).remove();
-                  
-                  Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Membership "${membership['name']}" deleted successfully!'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                  _fetchMemberships(); // Refresh list
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Error deleting membership: $e'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-              ),
-              child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
-    );
-  }
+  // Delete functionality removed - durations are static and cannot be deleted
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Manage Membership Types'),
+        title: const Text('Duration Price Management'),
         backgroundColor: Colors.deepPurple,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _fetchMemberships,
+            onPressed: _fetchDurations,
             tooltip: 'Refresh',
           ),
         ],
@@ -333,7 +262,7 @@ class _MembershipManagementPageState extends State<MembershipManagementPage> wit
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Manage membership types and prices. These will be available when registering members.',
+                          'Duration types are completely static and cannot be changed. Only prices can be updated.',
                           style: TextStyle(
                             fontSize: 14,
                             color: Colors.blue.shade700,
@@ -343,96 +272,73 @@ class _MembershipManagementPageState extends State<MembershipManagementPage> wit
                     ],
                   ),
                 ),
-                // Memberships list
+                // Durations list
                 Expanded(
-                  child: membershipsList.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: durationsList.length,
+                    itemBuilder: (context, index) {
+                      final duration = durationsList[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        elevation: 4,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.all(16),
+                          leading: Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: Colors.deepPurple.shade100,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.schedule,
+                              color: Colors.deepPurple,
+                            ),
+                          ),
+                          title: Text(
+                            duration['name'] ?? 'Unknown',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.card_membership, size: 64, color: Colors.grey),
-                              const SizedBox(height: 16),
-                              const Text(
-                                'No membership types yet',
-                                style: TextStyle(fontSize: 18, color: Colors.grey),
+                              Text(
+                                'Price: ${duration['price']} Birr',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.green.shade700,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                              const SizedBox(height: 8),
-                              const Text(
-                                'Tap + to add your first membership',
-                                style: TextStyle(fontSize: 14, color: Colors.grey),
+                              Text(
+                                'Duration: ${duration['days']} days',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.blue.shade700,
+                                  fontWeight: FontWeight.w500,
+                                ),
                               ),
                             ],
                           ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: membershipsList.length,
-                          itemBuilder: (context, index) {
-                            final membership = membershipsList[index];
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              elevation: 4,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.all(16),
-                                leading: Container(
-                                  width: 50,
-                                  height: 50,
-                                  decoration: BoxDecoration(
-                                    color: Colors.deepPurple.shade100,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.card_membership,
-                                    color: Colors.deepPurple,
-                                  ),
-                                ),
-                                title: Text(
-                                  membership['name'] ?? 'Unknown',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 18,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  'Price: ${membership['price']} Birr/Month',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.green.shade700,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(Icons.edit, color: Colors.blue),
-                                      onPressed: () => _editMembership(membership),
-                                      tooltip: 'Edit',
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.delete, color: Colors.red),
-                                      onPressed: () => _deleteMembership(membership),
-                                      tooltip: 'Delete',
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
+                          trailing: IconButton(
+                            icon: const Icon(Icons.edit, color: Colors.blue),
+                            onPressed: () => _editDuration(duration),
+                            tooltip: 'Edit Price',
+                          ),
                         ),
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addMembership,
-        icon: const Icon(Icons.add),
-        label: const Text('Add Membership'),
-        backgroundColor: Colors.deepPurple,
-      ),
     );
   }
 }
-

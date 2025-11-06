@@ -23,7 +23,6 @@ class _ActivePageState extends State<ActivePage>
   Timer? countdownTimer;
   TextEditingController searchController = TextEditingController();
   bool _showRegisterErrorDetails = false; // Toggle for showing register error details
-  List<Map<String, dynamic>> _membershipTypes = []; // Dynamic membership types
   
   // Pagination variables
   int _currentPage = 1;
@@ -34,41 +33,10 @@ class _ActivePageState extends State<ActivePage>
   @override
   void initState() {
     super.initState();
-    _fetchMembershipTypes();
     _fetchActiveMembers();
     _startCountdownTimer();
   }
 
-  // Fetch membership types from database
-  Future<void> _fetchMembershipTypes() async {
-    try {
-      final DatabaseReference membershipsRef = FirebaseDatabase.instance.ref('memberships');
-      final DatabaseEvent event = await membershipsRef.once();
-      
-      List<Map<String, dynamic>> loadedMemberships = [];
-      
-      if (event.snapshot.value != null) {
-        final Map<dynamic, dynamic> membershipsMap = event.snapshot.value as Map<dynamic, dynamic>;
-        
-        membershipsMap.forEach((key, value) {
-          if (value is Map) {
-            Map<String, dynamic> membership = Map<String, dynamic>.from(value);
-            membership['id'] = key;
-            loadedMemberships.add(membership);
-          }
-        });
-      }
-      
-      // Sort by name
-      loadedMemberships.sort((a, b) => (a['name'] ?? '').compareTo(b['name'] ?? ''));
-
-      setState(() {
-        _membershipTypes = loadedMemberships;
-      });
-    } catch (e) {
-      print('Error fetching membership types: $e');
-    }
-  }
 
   void _startCountdownTimer() {
     countdownTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
@@ -165,6 +133,7 @@ class _ActivePageState extends State<ActivePage>
         EthiopianDateConverter.convertToGregorianDate(ethiopianDate);
     return gregorianDate;
   }
+
 
   // Calculates remaining days until the membership expires
   int _getRemainingDays(DateTime registerDate, String duration) {
@@ -278,9 +247,28 @@ class _ActivePageState extends State<ActivePage>
     }
   }
 
-  // Re-register function for updating membership
-  Future<void> _reRegister(String memberId, int currentWeight, String currentMembership,
-      String currentDuration, Map<String, dynamic> member) async {
+  // Re-register function for updating duration
+  Future<void> _reRegister(String memberId, int currentWeight, String currentDuration, Map<String, dynamic> member) async {
+    // Load durations dynamically from DB
+    List<Map<String, dynamic>> durationsList = [];
+    try {
+      final DatabaseReference durationsRef = FirebaseDatabase.instance.ref('durations');
+      final DatabaseEvent event = await durationsRef.once();
+      if (event.snapshot.value != null) {
+        final durationsMap = event.snapshot.value as Map<dynamic, dynamic>;
+        durationsMap.forEach((key, value) {
+          if (value is Map) {
+            durationsList.add({
+              'id': key,
+              'name': value['name'],
+              'price': value['price'],
+              'days': value['days'],
+            });
+          }
+        });
+      }
+      durationsList.sort((a, b) => (a['days'] ?? 0).compareTo(b['days'] ?? 0));
+    } catch (e) {}
     // Get the CURRENT register date (not from errors array)
     // The member['registerDate'] field always stores the LATEST/CURRENT registration date
     String currentRegisterDate = '';
@@ -320,8 +308,7 @@ class _ActivePageState extends State<ActivePage>
         TextEditingController(text: currentRemaining.toString());
 
     // Variables for dropdown values
-    String _membership = currentMembership;
-    String _duration = currentDuration;
+    String _duration = currentDuration; // Preselect current duration
     int? _remaining = currentRemaining; // Initialize with current remaining value
     bool _isUpdating = false; // Track update state
 
@@ -367,42 +354,23 @@ class _ActivePageState extends State<ActivePage>
                   ),
                 ),
                 DropdownButtonFormField<String>(
-                  value: _membership,
-                  onChanged: (newValue) {
-                    setState(() {
-                      _membership = newValue!;
-                    });
-                  },
-                  items: _membershipTypes.isEmpty
-                      ? const [
-                          DropdownMenuItem(value: 'Standard', child: Text('Standard')),
-                    DropdownMenuItem(value: 'Premium', child: Text('Premium')),
-                    DropdownMenuItem(value: 'VIP', child: Text('VIP')),
-                        ]
-                      : _membershipTypes.map((membership) {
-                          return DropdownMenuItem<String>(
-                            value: membership['name'],
-                            child: Text('${membership['name']} (${membership['price']} Birr/Month)'),
-                          );
-                        }).toList(),
-                  decoration: InputDecoration(labelText: 'Membership'),
-                ),
-                DropdownButtonFormField<String>(
                   value: _duration,
+                  hint: Text('Choose duration'),
                   onChanged: (newValue) {
                     setState(() {
-                      _duration = newValue!;
+                      _duration = newValue ?? _duration;
                     });
                   },
-                  items: const [
-                    DropdownMenuItem(value: '1 Month', child: Text('1 Month')),
-                    DropdownMenuItem(
-                        value: '2 Months', child: Text('2 Months')),
-                    DropdownMenuItem(
-                        value: '3 Months', child: Text('3 Months')),
-                    DropdownMenuItem(
-                        value: '6 Months', child: Text('6 Months')),
-                    DropdownMenuItem(value: '1 Year', child: Text('1 Year')),
+                  validator: (value) => (value == null || value.isEmpty) ? 'Please choose a duration' : null,
+                  items: durationsList.isNotEmpty
+                      ? durationsList
+                          .map<DropdownMenuItem<String>>((d) => DropdownMenuItem<String>(
+                                value: (d['name'] as String?) ?? '',
+                                child: Text((d['name'] as String?) ?? ''),
+                              ))
+                          .toList()
+                      : [
+                          DropdownMenuItem<String>(value: '', child: Text('No durations available')),
                   ],
                   decoration: InputDecoration(labelText: 'Duration'),
                 ),
@@ -587,13 +555,23 @@ class _ActivePageState extends State<ActivePage>
                 // Ensure remaining has a valid value
                 int remainingValue = _remaining ?? currentRemaining;
 
+                // Compute price from selected duration (from DB list)
+                int computedPrice = 0;
+                try {
+                  final idx = durationsList.indexWhere((d) => (d['name'] as String?) == _duration);
+                  if (idx != -1) {
+                    final p = durationsList[idx]['price'];
+                    if (p is int) computedPrice = p; else if (p is num) computedPrice = p.toInt();
+                  }
+                } catch (e) {}
+
                 // Update member data in members path
                 _databaseRef.child(memberId).update({
                   'registerDate': newRegisterDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
                   'weight': weightValue, // Ensure it's stored as int with null safety
                   'remaining': remainingValue, // Add remaining field (ቀሪ) with null safety
-                  'membership': _membership, // New membership value
                   'duration': _duration, // New duration value
+                  'price': computedPrice, // Save price alongside duration
                   'registerErrors': registerErrors, // Add register errors array
                   'status': 'active',
                   'lastUpdatedDate': DateTime.now().toIso8601String(), // Track when last updated
@@ -610,8 +588,8 @@ class _ActivePageState extends State<ActivePage>
                       'registerDate': newRegisterDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
                       'weight': weightValue,
                       'remaining': remainingValue,
-                      'membership': _membership,
                       'duration': _duration,
+                      'price': computedPrice,
                       'firstName': member['firstName'],
                       'lastName': member['lastName'],
                       'lockerKey': member['lockerKey'],
@@ -773,7 +751,6 @@ class _ActivePageState extends State<ActivePage>
                           ),
                         ),
                                   const SizedBox(height: 8),
-                            Text('Membership: ${member['membership'] ?? 'Standard'}'),
                             Text(
                                 'Registered on: ${_convertToEthiopianDate(registerDate)}'),
                             Text('Duration: ${member['duration'] ?? 'N/A'}'),
@@ -879,8 +856,7 @@ class _ActivePageState extends State<ActivePage>
                           onPressed: () async => await _reRegister(
                             member['id'],
                             member['weight'] ?? 0, // Provide default value if null
-                            member['membership'] ?? 'Standard', // Provide default if null
-                            member['duration'] ?? '1 Month', // Provide default if null
+                            member['duration'] ?? '2 Weeks', // Provide default if null
                             member, // Add member parameter
                           ),
                           child: const Text('Update'),
@@ -939,6 +915,12 @@ class _ActivePageState extends State<ActivePage>
     String formattedEthiopianDate =
         '${ethiopianDate.year}-${ethiopianDate.month}-${ethiopianDate.day}';
     return formattedEthiopianDate;
+  }
+
+  // Get current Ethiopian date in YYYY-MM-DD format
+  String _getCurrentEthiopianDate() {
+    DateTime now = DateTime.now();
+    return _convertToEthiopianDate(now);
   }
 
   /// Build update tracking badge to show registration or update info

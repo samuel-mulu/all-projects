@@ -9,7 +9,9 @@ import 'screens/inactive_page.dart';
 import 'login_page.dart'; // Import your login page
 import 'screens/reporter.dart';
 import 'screens/signup_page.dart'; // Import the signup page
-import 'screens/membership_management_page.dart'; // Import membership management page
+import 'screens/membership_management_page.dart'; // Import duration management page
+import 'screens/approve_deletions_page.dart'; // Import approve deletions page
+import 'screens/user_management_page.dart'; // Import user management page
 import 'utils/reliable_text_widget.dart';
 
 class MyHomePage extends StatefulWidget {
@@ -75,29 +77,50 @@ class _MyHomePageState extends State<MyHomePage> {
   bool get isAdmin => widget.userRole == 'admin';
   String get _userName => widget.userName;
 
-  Future<void> _fetchActiveMembersCount() async {
+  Future<void> _fetchActiveMembersCount({bool clearCache = false}) async {
     try {
+      if (clearCache) {
+        // Force Firebase to bypass cache by going offline then online
+        await FirebaseDatabase.instance.goOffline();
+        await Future.delayed(const Duration(milliseconds: 100));
+        await FirebaseDatabase.instance.goOnline();
+      }
+      
       final DatabaseEvent event = await _firebaseService.getActiveMembers();
       if (event.snapshot.value != null) {
         final activeMembersMap = event.snapshot.value as Map<dynamic, dynamic>;
+        // Filter for active members only
+        int count = 0;
+        activeMembersMap.forEach((key, value) {
+          if (value is Map && value['status'] == 'active') {
+            count++;
+          }
+        });
         if (_isMounted) {
-          // Check if still mounted
           setState(() {
-            activeMemberCount = activeMembersMap.length;
+            activeMemberCount = count;
           });
         }
       } else {
         if (_isMounted) {
-          // Check if still mounted
           setState(() {
             activeMemberCount = 0;
           });
         }
       }
+      
+      if (clearCache && _isMounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Cache cleared & data refreshed!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     } catch (e) {
       print('Error fetching active members: $e');
       if (_isMounted) {
-        // Check if still mounted
         setState(() {
           activeMemberCount = 0;
         });
@@ -162,39 +185,22 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               ),
             ),
-          // Only show signup button for non-admin users
-          if (!isAdmin)
-            IconButton(
-              icon: Icon(Icons.person_add, size: isMobile ? 20 : 24),
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => const SignupPage(),
-                  ),
-                );
-              },
-              tooltip: 'Create New Account',
-            ),
-          // Only show membership management for non-admin users
-          if (!isAdmin)
-            IconButton(
-              icon: Icon(Icons.settings, size: isMobile ? 20 : 24),
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => const MembershipManagementPage(),
-                  ),
-                );
-              },
-              tooltip: 'Manage Memberships',
-            ),
+          IconButton(
+            icon: Icon(Icons.cleaning_services, 
+                color: Colors.amber, 
+                size: isMobile ? 22 : 26),
+            onPressed: () => _fetchActiveMembersCount(clearCache: true),
+            tooltip: 'Clear Cache & Refresh',
+          ),
           IconButton(
             icon: Icon(Icons.refresh, size: isMobile ? 20 : 24),
-            onPressed: _fetchActiveMembersCount, // Refresh member count
+            onPressed: _fetchActiveMembersCount,
+            tooltip: 'Refresh',
           ),
           IconButton(
             icon: Icon(Icons.logout, size: isMobile ? 20 : 24),
             onPressed: _signOut,
+            tooltip: 'Logout',
           ),
         ],
       ),
@@ -264,25 +270,24 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  // Build the horizontal scrolling pages
+  // Build the main page (no horizontal scrolling needed)
   Widget _buildHorizontalScrollPages() {
-    return PageView(
-      scrollDirection: Axis.horizontal,
-      children: [
-        _buildButtonRow(),
-        _buildReporterButton(), // Add the reporter button here
-      ],
-    );
+    return _buildMainButtonsGrid();
   }
 
-  Widget _buildButtonRow() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Row(
+  // Build buttons based on user role
+  Widget _buildMainButtonsGrid() {
+    if (isAdmin) {
+      // ADMIN: 4 buttons - first 2 visible, scroll for remaining 2
+      return Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (isAdmin)
+            // First 2 buttons (always visible)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
               _buildButtonCard('Register', Icons.app_registration, () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -293,7 +298,6 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                 );
               }),
-            const SizedBox(width: 10),
             _buildButtonCard(
               'Active Members ($activeMemberCount)',
               Icons.people,
@@ -305,32 +309,63 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                 )
                     .then((_) {
-                  _fetchActiveMembersCount(); // Refresh count after returning
+                      _fetchActiveMembersCount();
                 });
               },
+                ),
+              ],
             ),
-            const SizedBox(width: 10),
+            SizedBox(height: 20),
+            // Horizontal scroll for remaining 2 buttons (mobile optimized)
+            Container(
+              height: 120, // Fixed height for consistent scrolling
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: BouncingScrollPhysics(), // Better mobile feel
+                child: Row(
+                  children: [
+                    SizedBox(width: 16), // Left padding
+                    _buildButtonCard('Inactive Members', Icons.cancel, () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const InactivePage(),
+                        ),
+                      );
+                    }),
+                    SizedBox(width: 16),
+                    _buildButtonCard('Report', Icons.report, () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => ReporterPage(),
+                        ),
+                      );
+                    }),
+                    SizedBox(width: 16), // Right padding
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 20),
+            // Refresh button
             IconButton(
-              icon: Icon(Icons.refresh, color: Colors.blue),
-              onPressed: _fetchActiveMembersCount, // Immediate refresh
+              icon: Icon(Icons.refresh, color: Colors.blue, size: 32),
+              onPressed: _fetchActiveMembersCount,
               tooltip: 'Refresh Active Members Count',
             ),
           ],
         ),
-        const SizedBox(height: 10), // Add spacing between rows
-        Row(
+      );
+    } else {
+      // USER: 7 buttons - first 3 visible, scroll for remaining 4
+      return Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _buildButtonCard('Inactive Members', Icons.cancel, () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => const InactivePage(),
-                ),
-              );
-            }),
-            // Only show Create Account button for non-admin users
-            if (!isAdmin) ...[
-              const SizedBox(width: 10),
+            // First 2 buttons (always visible)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
               _buildButtonCard('Create Account', Icons.person_add, () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -338,34 +373,100 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                 );
               }),
-            ],
+                _buildButtonCard(
+                  'Active Members ($activeMemberCount)',
+                  Icons.people,
+                  () {
+                    Navigator.of(context)
+                        .push(
+                      MaterialPageRoute(
+                        builder: (context) => const ActivePage(),
+                      ),
+                    )
+                        .then((_) {
+                      _fetchActiveMembersCount();
+                    });
+                  },
+                ),
+              ],
+            ),
+            SizedBox(height: 20),
+            // Horizontal scroll for remaining 5 buttons (mobile optimized)
+            Container(
+              height: 120, // Fixed height for consistent scrolling
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: BouncingScrollPhysics(), // Better mobile feel
+                child: Row(
+                  children: [
+                    SizedBox(width: 16), // Left padding
+                    _buildButtonCard('Inactive Members', Icons.cancel, () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const InactivePage(),
+                        ),
+                      );
+                    }),
+                    SizedBox(width: 16),
+                    _buildButtonCard('Report', Icons.report, () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => ReporterPage(),
+                        ),
+                      );
+                    }),
+                    SizedBox(width: 16),
+                    _buildButtonCard('Manage Users', Icons.people_alt, () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const UserManagementPage(),
+                        ),
+                      );
+                    }),
+                    SizedBox(width: 16),
+                    _buildButtonCard('Approve Deletions', Icons.approval, () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const ApproveDeletionsPage(),
+                        ),
+                      );
+                    }),
+                    SizedBox(width: 16),
+                    _buildButtonCard('Durations', Icons.settings, () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const DurationManagementPage(),
+                        ),
+                      );
+                    }),
+                    SizedBox(width: 16), // Right padding
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 20),
+            // Refresh button
+            IconButton(
+              icon: Icon(Icons.refresh, color: Colors.blue, size: 32),
+              onPressed: _fetchActiveMembersCount,
+              tooltip: 'Refresh Active Members Count',
+            ),
           ],
         ),
-      ],
-    );
+      );
+    }
   }
 
-  Widget _buildReporterButton() {
-    return Center(
-      child: _buildButtonCard('Reporter', Icons.report, () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => ReporterPage(),
-          ),
-        );
-      }),
-    );
-  }
 
   Widget _buildButtonCard(String label, IconData icon, VoidCallback onPressed) {
     double screenWidth = MediaQuery.of(context).size.width;
     bool isMobile = screenWidth < 600;
     
-    // Calculate responsive sizes
-    double cardWidth = isMobile ? (screenWidth * 0.4) : 150;
-    double cardHeight = isMobile ? 100 : 120;
-    double iconSize = isMobile ? 35 : 50;
-    double fontSize = isMobile ? 12 : 16;
+    // Calculate responsive sizes optimized for mobile horizontal scroll
+    double cardWidth = isMobile ? (screenWidth * 0.35) : 150; // Smaller for mobile scroll
+    double cardHeight = isMobile ? 90 : 120; // Compact height for mobile
+    double iconSize = isMobile ? 24 : 50; // Smaller icon for mobile
+    double fontSize = isMobile ? 11 : 16; // Smaller text for mobile
     
     return Card(
       shape: RoundedRectangleBorder(

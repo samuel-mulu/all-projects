@@ -14,6 +14,7 @@ import '../../utils/cloudinary_test.dart';
 import '../../utils/permission_checker.dart';
 import '../../utils/reliable_text_widget.dart';
 import '../../utils/reliable_state_mixin.dart';
+import '../../utils/duration_helper.dart';
 import 'package:intl/intl.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -39,10 +40,8 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
   String? _firstName, _lastName, _lockerKey;
   int? _weight;
   int? _remaining; // New field for "ቀሪ" (remaining)
-  String _membership = 'Standard';
   String _duration = '1 Month';
-  List<Map<String, dynamic>> _membershipTypes = [];
-  bool _isLoadingMemberships = true;
+  // Removed membership logic - now using duration-only pricing
   DateTime _registerDate = DateTime.now(); // Default registration date and time
   String? _phoneNumber; // New variable for phone number
   String _paymentMethod = 'CASH'; // Default payment method
@@ -57,80 +56,28 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
   double _profileUploadProgress = 0.0; // Profile upload progress
   bool _useUnsignedUpload = false; // Toggle between signed/unsigned uploads
 
-  // Membership prices for validation
-  static const Map<String, int> membershipPrices = {
-    "Standard": 500,
-    "Premium": 700,
-    "VIP": 1500,
-  };
+  // Removed membership prices - now using DurationHelper
 
-  // Fetch membership types from database
-  Future<void> _fetchMembershipTypes() async {
+  // Removed membership fetching - now using DurationHelper for pricing
+
+  // Calculate total price based on duration only
+  int _calculateTotalPrice() {
+    // Prefer fetched durations from DB if available
     try {
-      final DatabaseReference membershipsRef = FirebaseDatabase.instance.ref('memberships');
-      final DatabaseEvent event = await membershipsRef.once();
-      
-      List<Map<String, dynamic>> loadedMemberships = [];
-      
-      // Only load from database, no default memberships
-      if (event.snapshot.value != null) {
-        final Map<dynamic, dynamic> membershipsMap = event.snapshot.value as Map<dynamic, dynamic>;
-        
-        membershipsMap.forEach((key, value) {
-          if (value is Map) {
-            Map<String, dynamic> membership = Map<String, dynamic>.from(value);
-            membership['id'] = key;
-            loadedMemberships.add(membership);
-          }
-        });
+      final int index = _durationsList.indexWhere(
+        (d) => (d['name'] as String?) == _duration,
+      );
+      if (index != -1) {
+        final dynamic price = _durationsList[index]['price'];
+        if (price is int) return price;
+        if (price is num) return price.toInt();
       }
-      
-      // Sort by name
-      loadedMemberships.sort((a, b) => (a['name'] ?? '').compareTo(b['name'] ?? ''));
-
-      forceReliableUpdate(() {
-        _membershipTypes = loadedMemberships;
-        _isLoadingMemberships = false;
-        
-        // Set default membership to first available, or empty if none
-        if (_membershipTypes.isNotEmpty) {
-          // Check if current membership exists in the list
-          if (!_membershipTypes.any((m) => m['name'] == _membership)) {
-            _membership = _membershipTypes[0]['name'];
-          }
-        } else {
-          _membership = ''; // No memberships available
-        }
-      });
-    } catch (e) {
-      print('Error fetching membership types: $e');
-      forceReliableUpdate(() {
-        _isLoadingMemberships = false;
-      });
+    } catch (_) {
+      // Fallback below
     }
+    // Fallback to DurationHelper mapping
+    return DurationHelper.getDurationPrice(_duration);
   }
-
-  // Calculate total membership price based on membership type and duration
-  int _calculateTotalMembershipPrice() {
-    // First try to get price from loaded membership types
-    int pricePerMonth = 0;
-    final membership = _membershipTypes.firstWhere(
-      (m) => m['name'] == _membership,
-      orElse: () => {'name': _membership, 'price': membershipPrices[_membership] ?? 0},
-    );
-    pricePerMonth = membership['price'] ?? 0;
-    
-    int durationMonths = 1;
-    
-    if (_duration.contains('Month')) {
-      durationMonths = int.tryParse(_duration.split(' ')[0]) ?? 1;
-    } else if (_duration == '1 Year') {
-      durationMonths = 12;
-    }
-    
-    return pricePerMonth * durationMonths;
-  }
-
 
   Future<void> _loadMemberData() async {
     try {
@@ -145,10 +92,11 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
           _lastName = member['lastName'];
           _weight = member['weight'];
           _remaining = member['remaining']; // Load the new "ቀሪ" field
-          _membership = member['membership'];
+          // Removed membership field - now using duration-only pricing
           _duration = member['duration'];
           _registerDate = DateTime.parse(member['registerDate']);
-          _dateController.text = DateFormat('yyyy-MM-dd').format(_registerDate); // Update date controller
+          _dateController.text = DateFormat('yyyy-MM-dd')
+              .format(_registerDate); // Update date controller
           _lockerKey = member['lockerKey'];
           _phoneNumber = member['phoneNumber'];
           _paymentMethod = member['paymentMethod'] ?? 'CASH';
@@ -157,7 +105,6 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
         });
       }
     } catch (e) {
-      print('Error loading member data: $e');
       // Handle error appropriately
     }
   }
@@ -165,14 +112,54 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
   // Text controller for manual date input
   final TextEditingController _dateController = TextEditingController();
 
+  List<Map<String, dynamic>> _durationsList = [];
+  bool _isDurationsLoading = true;
+
   @override
   void initState() {
     super.initState();
-    // Initialize date controller with current date
     _dateController.text = DateFormat('yyyy-MM-dd').format(_registerDate);
-    _fetchMembershipTypes(); // Load membership types from database
+    _fetchDurations();
     if (widget.memberId.isNotEmpty) {
       _loadMemberData();
+    }
+  }
+
+  Future<void> _fetchDurations() async {
+    try {
+      setState(() {
+        _isDurationsLoading = true;
+      });
+      final DatabaseReference durationsRef =
+          FirebaseDatabase.instance.ref('durations');
+      final DatabaseEvent event = await durationsRef.once();
+      List<Map<String, dynamic>> durations = [];
+      if (event.snapshot.value != null) {
+        final durationsMap = event.snapshot.value as Map<dynamic, dynamic>;
+        durationsMap.forEach((key, value) {
+          if (value is Map) {
+            durations.add({
+              'id': key,
+              'name': value['name'],
+              'price': value['price'],
+              'days': value['days'],
+            });
+          }
+        });
+      }
+      durations.sort((a, b) => (a['days'] ?? 0).compareTo(b['days'] ?? 0));
+      setState(() {
+        _durationsList = durations;
+        _isDurationsLoading = false;
+        if (_durationsList.isNotEmpty &&
+            !_durationsList.any((d) => d['name'] == _duration)) {
+          _duration = _durationsList.first['name'];
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _isDurationsLoading = false;
+      });
     }
   }
 
@@ -199,17 +186,18 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
 
   void _onDateTextChanged(String value) {
     // Validate and parse the date input
-    if (value.length == 10) { // yyyy-MM-dd format
+    if (value.length == 10) {
+      // yyyy-MM-dd format
       try {
         final DateTime parsedDate = DateTime.parse(value);
-        if (parsedDate.isAfter(DateTime(1999)) && parsedDate.isBefore(DateTime(2101))) {
+        if (parsedDate.isAfter(DateTime(1999)) &&
+            parsedDate.isBefore(DateTime(2101))) {
           forceReliableUpdate(() {
             _registerDate = parsedDate;
           });
         }
       } catch (e) {
         // Invalid date format, keep the text but don't update the date
-        print('Invalid date format: $value');
       }
     }
   }
@@ -227,7 +215,6 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
       return !members.values.any((member) =>
           (member as Map<dynamic, dynamic>)['lockerKey'] == lockerKey);
     } catch (e) {
-      print('Error checking locker key uniqueness: $e');
       return false; // Default to false if an error occurs
     }
   }
@@ -235,33 +222,28 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
   /// Handle payment image selection and upload
   Future<void> _handlePaymentImageSelection() async {
     try {
-      print('🔄 Starting image selection process...');
-      
       // Check permissions first
-      print('🔐 Checking permissions before image selection...');
       final permissions = await PermissionChecker.checkAllPermissions();
       final cameraGranted = permissions['camera'] ?? false;
-      
+
       if (!cameraGranted) {
-        print('❌ Camera permission not granted, requesting...');
         final granted = await PermissionChecker.requestCameraPermission();
         if (!granted) {
-          print('❌ Camera permission denied by user');
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Camera permission is required to select images. Please enable it in settings.'),
+              content: Text(
+                  'Camera permission is required to select images. Please enable it in settings.'),
               backgroundColor: Colors.red,
               duration: Duration(seconds: 4),
             ),
           );
           return;
         }
-        print('✅ Camera permission granted');
       }
-      
+
       File? imageFile;
       XFile? xFile;
-      
+
       if (kIsWeb) {
         // For web platform, use XFile approach
         print('🌐 Web platform detected - using XFile approach');
@@ -275,12 +257,12 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
         print('📱 Image selection dialog closed (File)');
         print('📁 Selected image file: ${imageFile?.path}');
       }
-      
+
       if (!mounted) {
         print('❌ Widget not mounted, returning');
         return; // Check if widget is still mounted
       }
-      
+
       // Validate the selected image
       bool isValidImage = false;
       if (kIsWeb && xFile != null) {
@@ -291,82 +273,87 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
         isValidImage = ImagePickerService.validateImage(imageFile);
         print('✅ File is valid: $isValidImage');
       }
-      
+
       if (isValidImage) {
         print('✅ Image file is valid, starting upload process');
         if (!kIsWeb && imageFile != null) {
           print('📊 File size: ${ImagePickerService.getFileSize(imageFile)}');
         }
-        print('🔧 Upload method: ${_useUnsignedUpload ? "Unsigned" : "Signed"}');
-        
+        print(
+            '🔧 Upload method: ${_useUnsignedUpload ? "Unsigned" : "Signed"}');
+
         forceReliableUpdate(() {
           _paymentImage = imageFile; // This will be null on web, which is fine
           _isUploadingImage = true;
           _uploadProgress = 0.0;
         });
-        
+
         print('🎯 Starting Cloudinary upload...');
 
         // Upload to Cloudinary with progress tracking
         print('📤 Calling Cloudinary service...');
         String? imageUrl;
-        
+
         if (kIsWeb && xFile != null) {
           print('🌐 Web platform - using XFile upload');
-          imageUrl = _useUnsignedUpload 
-            ? await CloudinaryServiceUnsigned.uploadImageFromXFile(
-                xFile,
-                folder: 'gym_payments',
-                onProgress: (progress) {
-                  print('📈 Upload progress: ${progress.toStringAsFixed(1)}%');
-                  if (mounted) {
-                    forceReliableUpdate(() {
-                      _uploadProgress = progress;
-                    });
-                  }
-                },
-              )
-            : await CloudinaryServiceWeb.uploadImageFromXFile(
-                xFile,
-                folder: 'gym_payments',
-                onProgress: (progress) {
-                  print('📈 Upload progress: ${progress.toStringAsFixed(1)}%');
-                  if (mounted) {
-                    forceReliableUpdate(() {
-                      _uploadProgress = progress;
-                    });
-                  }
-                },
-              );
+          imageUrl = _useUnsignedUpload
+              ? await CloudinaryServiceUnsigned.uploadImageFromXFile(
+                  xFile,
+                  folder: 'gym_payments',
+                  onProgress: (progress) {
+                    print(
+                        '📈 Upload progress: ${progress.toStringAsFixed(1)}%');
+                    if (mounted) {
+                      forceReliableUpdate(() {
+                        _uploadProgress = progress;
+                      });
+                    }
+                  },
+                )
+              : await CloudinaryServiceWeb.uploadImageFromXFile(
+                  xFile,
+                  folder: 'gym_payments',
+                  onProgress: (progress) {
+                    print(
+                        '📈 Upload progress: ${progress.toStringAsFixed(1)}%');
+                    if (mounted) {
+                      forceReliableUpdate(() {
+                        _uploadProgress = progress;
+                      });
+                    }
+                  },
+                );
         } else if (!kIsWeb && imageFile != null) {
           print('📱 Mobile platform detected - using standard upload');
-          imageUrl = _useUnsignedUpload 
-            ? await CloudinaryServiceUnsigned.uploadImage(
-                imageFile,
-                folder: 'gym_payments',
-                onProgress: (progress) {
-                  print('📈 Upload progress: ${progress.toStringAsFixed(1)}%');
-                  if (mounted) {
-                    forceReliableUpdate(() {
-                      _uploadProgress = progress;
-                    });
-                  }
-                },
-              )
-            : await CloudinaryService.uploadImage(
-                imageFile,
-                folder: 'gym_payments',
-                onProgress: (progress) {
-                  print('📈 Upload progress: ${progress.toStringAsFixed(1)}%');
-                  if (mounted) {
-                    forceReliableUpdate(() {
-                      _uploadProgress = progress;
-                    });
-                  }
-                },
-              );
+          imageUrl = _useUnsignedUpload
+              ? await CloudinaryServiceUnsigned.uploadImage(
+                  imageFile,
+                  folder: 'gym_payments',
+                  onProgress: (progress) {
+                    print(
+                        '📈 Upload progress: ${progress.toStringAsFixed(1)}%');
+                    if (mounted) {
+                      forceReliableUpdate(() {
+                        _uploadProgress = progress;
+                      });
+                    }
+                  },
+                )
+              : await CloudinaryService.uploadImage(
+                  imageFile,
+                  folder: 'gym_payments',
+                  onProgress: (progress) {
+                    print(
+                        '📈 Upload progress: ${progress.toStringAsFixed(1)}%');
+                    if (mounted) {
+                      forceReliableUpdate(() {
+                        _uploadProgress = progress;
+                      });
+                    }
+                  },
+                );
         }
-        
+
         print('📥 Cloudinary service returned: $imageUrl');
 
         if (imageUrl != null) {
@@ -375,27 +362,27 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
             print('❌ Widget not mounted after upload, returning');
             return; // Check if widget is still mounted
           }
-          
+
           forceReliableUpdate(() {
             _uploadProgress = 100.0; // Show 100% completion
           });
-          
+
           print('⏳ Waiting 500ms to show 100% completion...');
           // Wait a moment to show 100% completion
           await Future.delayed(const Duration(milliseconds: 500));
-          
+
           if (!mounted) {
             print('❌ Widget not mounted after delay, returning');
             return; // Check again after delay
           }
-          
+
           forceReliableUpdate(() {
             _paymentImageUrl = imageUrl;
             _isUploadingImage = false;
           });
-          
+
           print('🎉 Upload process completed successfully!');
-          
+
           // Show success message with animation
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -434,17 +421,18 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
             print('❌ Widget not mounted after failed upload, returning');
             return; // Check if widget is still mounted
           }
-          
+
           forceReliableUpdate(() {
             _paymentImage = null;
             _isUploadingImage = false;
             _uploadProgress = 0.0;
           });
-          
+
           print('🚨 Showing error snackbar for failed upload');
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Failed to upload payment receipt. Please try again.'),
+              content:
+                  Text('Failed to upload payment receipt. Please try again.'),
               backgroundColor: Colors.red,
             ),
           );
@@ -455,7 +443,7 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
           print('❌ Widget not mounted after invalid image, returning');
           return; // Check if widget is still mounted
         }
-        
+
         print('🚨 Showing error snackbar for invalid image');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -473,18 +461,18 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
         print('📊 Error details: ${e.toString()}');
         print('📊 Stack trace: ${e.stackTrace}');
       }
-      
+
       if (!mounted) {
         print('❌ Widget not mounted after exception, returning');
         return; // Check if widget is still mounted
       }
-      
+
       forceReliableUpdate(() {
         _paymentImage = null;
         _isUploadingImage = false;
         _uploadProgress = 0.0;
       });
-      
+
       print('🚨 Showing error snackbar for exception');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -508,32 +496,30 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
   Future<void> _handleProfileImageSelection() async {
     try {
       print('🔄 Starting profile image selection process...');
-      
+
       // Check permissions first
       print('🔐 Checking permissions before image selection...');
       final permissions = await PermissionChecker.checkAllPermissions();
       final cameraGranted = permissions['camera'] ?? false;
-      
+
       if (!cameraGranted) {
-        print('❌ Camera permission not granted, requesting...');
         final granted = await PermissionChecker.requestCameraPermission();
         if (!granted) {
-          print('❌ Camera permission denied by user');
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Camera permission is required to select images. Please enable it in settings.'),
+              content: Text(
+                  'Camera permission is required to select images. Please enable it in settings.'),
               backgroundColor: Colors.red,
               duration: Duration(seconds: 4),
             ),
           );
           return;
         }
-        print('✅ Camera permission granted');
       }
-      
+
       File? imageFile;
       XFile? xFile;
-      
+
       if (kIsWeb) {
         // For web platform, use XFile approach
         print('🌐 Web platform detected - using XFile approach');
@@ -547,12 +533,12 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
         print('📱 Image selection dialog closed (File)');
         print('📁 Selected image file: ${imageFile?.path}');
       }
-      
+
       if (!mounted) {
         print('❌ Widget not mounted, returning');
         return;
       }
-      
+
       // Validate the selected image
       bool isValidImage = false;
       if (kIsWeb && xFile != null) {
@@ -562,99 +548,103 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
         isValidImage = ImagePickerService.validateImage(imageFile);
         print('✅ File is valid: $isValidImage');
       }
-      
+
       if (isValidImage) {
         print('✅ Profile image is valid, starting upload process');
         if (!kIsWeb && imageFile != null) {
           print('📊 File size: ${ImagePickerService.getFileSize(imageFile)}');
         }
-        
+
         forceReliableUpdate(() {
           _profileImage = imageFile;
           _isUploadingProfile = true;
           _profileUploadProgress = 0.0;
         });
-        
+
         print('🎯 Starting Cloudinary upload for profile...');
         String? imageUrl;
-        
+
         if (kIsWeb && xFile != null) {
           print('🌐 Web platform - using XFile upload');
-          imageUrl = _useUnsignedUpload 
-            ? await CloudinaryServiceUnsigned.uploadImageFromXFile(
-                xFile,
-                folder: 'gym_profiles',
-                onProgress: (progress) {
-                  print('📈 Profile upload progress: ${progress.toStringAsFixed(1)}%');
-                  if (mounted) {
-                    forceReliableUpdate(() {
-                      _profileUploadProgress = progress;
-                    });
-                  }
-                },
-              )
-            : await CloudinaryServiceWeb.uploadImageFromXFile(
-                xFile,
-                folder: 'gym_profiles',
-                onProgress: (progress) {
-                  print('📈 Profile upload progress: ${progress.toStringAsFixed(1)}%');
-                  if (mounted) {
-                    forceReliableUpdate(() {
-                      _profileUploadProgress = progress;
-                    });
-                  }
-                },
-              );
+          imageUrl = _useUnsignedUpload
+              ? await CloudinaryServiceUnsigned.uploadImageFromXFile(
+                  xFile,
+                  folder: 'gym_profiles',
+                  onProgress: (progress) {
+                    print(
+                        '📈 Profile upload progress: ${progress.toStringAsFixed(1)}%');
+                    if (mounted) {
+                      forceReliableUpdate(() {
+                        _profileUploadProgress = progress;
+                      });
+                    }
+                  },
+                )
+              : await CloudinaryServiceWeb.uploadImageFromXFile(
+                  xFile,
+                  folder: 'gym_profiles',
+                  onProgress: (progress) {
+                    print(
+                        '📈 Profile upload progress: ${progress.toStringAsFixed(1)}%');
+                    if (mounted) {
+                      forceReliableUpdate(() {
+                        _profileUploadProgress = progress;
+                      });
+                    }
+                  },
+                );
         } else if (!kIsWeb && imageFile != null) {
           print('📱 Mobile platform - using standard upload');
-          imageUrl = _useUnsignedUpload 
-            ? await CloudinaryServiceUnsigned.uploadImage(
-                imageFile,
-                folder: 'gym_profiles',
-                onProgress: (progress) {
-                  print('📈 Profile upload progress: ${progress.toStringAsFixed(1)}%');
-                  if (mounted) {
-                    forceReliableUpdate(() {
-                      _profileUploadProgress = progress;
-                    });
-                  }
-                },
-              )
-            : await CloudinaryService.uploadImage(
-                imageFile,
-                folder: 'gym_profiles',
-                onProgress: (progress) {
-                  print('📈 Profile upload progress: ${progress.toStringAsFixed(1)}%');
-                  if (mounted) {
-                    forceReliableUpdate(() {
-                      _profileUploadProgress = progress;
-                    });
-                  }
-                },
-              );
+          imageUrl = _useUnsignedUpload
+              ? await CloudinaryServiceUnsigned.uploadImage(
+                  imageFile,
+                  folder: 'gym_profiles',
+                  onProgress: (progress) {
+                    print(
+                        '📈 Profile upload progress: ${progress.toStringAsFixed(1)}%');
+                    if (mounted) {
+                      forceReliableUpdate(() {
+                        _profileUploadProgress = progress;
+                      });
+                    }
+                  },
+                )
+              : await CloudinaryService.uploadImage(
+                  imageFile,
+                  folder: 'gym_profiles',
+                  onProgress: (progress) {
+                    print(
+                        '📈 Profile upload progress: ${progress.toStringAsFixed(1)}%');
+                    if (mounted) {
+                      forceReliableUpdate(() {
+                        _profileUploadProgress = progress;
+                      });
+                    }
+                  },
+                );
         }
-        
+
         print('📥 Cloudinary service returned: $imageUrl');
 
         if (imageUrl != null) {
           print('✅ Profile upload successful! Image URL: $imageUrl');
           if (!mounted) return;
-          
+
           forceReliableUpdate(() {
             _profileUploadProgress = 100.0;
           });
-          
+
           await Future.delayed(const Duration(milliseconds: 500));
-          
+
           if (!mounted) return;
-          
+
           forceReliableUpdate(() {
             _profileImageUrl = imageUrl;
             _isUploadingProfile = false;
           });
-          
+
           print('🎉 Profile upload completed successfully!');
-          
+
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Row(
@@ -671,16 +661,17 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
         } else {
           print('❌ Profile upload failed');
           if (!mounted) return;
-          
+
           forceReliableUpdate(() {
             _profileImage = null;
             _isUploadingProfile = false;
             _profileUploadProgress = 0.0;
           });
-          
+
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Failed to upload profile photo. Please try again.'),
+              content:
+                  Text('Failed to upload profile photo. Please try again.'),
               backgroundColor: Colors.red,
             ),
           );
@@ -688,7 +679,7 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
       } else if (imageFile != null) {
         print('❌ Profile image is invalid');
         if (!mounted) return;
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Invalid image file. Please select a valid image.'),
@@ -701,13 +692,13 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
     } catch (e) {
       print('💥 Exception in profile image selection: $e');
       if (!mounted) return;
-      
+
       forceReliableUpdate(() {
         _profileImage = null;
         _isUploadingProfile = false;
         _profileUploadProgress = 0.0;
       });
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error selecting profile image: $e'),
@@ -729,11 +720,13 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
   /// Test Cloudinary configuration (for debugging)
   void _testCloudinaryConfig() {
     CloudinaryTest.testConfiguration();
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Cloudinary Config: ${CloudinaryConfig.isConfigured ? "✅ Configured" : "❌ Not Configured"}'),
-        backgroundColor: CloudinaryConfig.isConfigured ? Colors.green : Colors.red,
+        content: Text(
+            'Cloudinary Config: ${CloudinaryConfig.isConfigured ? "✅ Configured" : "❌ Not Configured"}'),
+        backgroundColor:
+            CloudinaryConfig.isConfigured ? Colors.green : Colors.red,
         duration: const Duration(seconds: 3),
       ),
     );
@@ -743,13 +736,13 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
   void _testImagePicker() async {
     try {
       print('🧪 Testing image picker...');
-      
+
       if (kIsWeb) {
         // Test the web-compatible method
         print('🌐 Web platform detected - using XFile test');
         final xFile = await ImagePickerService.testImagePickerXFile();
         print('🧪 Web test result: ${xFile?.path}');
-        
+
         if (xFile != null) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -761,7 +754,8 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text('❌ Image Picker Test Failed - No image selected'),
+              content:
+                  const Text('❌ Image Picker Test Failed - No image selected'),
               backgroundColor: Colors.red,
               duration: const Duration(seconds: 3),
             ),
@@ -772,11 +766,12 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
         print('📱 Mobile platform detected - using File test');
         final imageFile = await ImagePickerService.testImagePicker();
         print('🧪 Mobile test result: ${imageFile?.path}');
-        
+
         if (imageFile != null) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('✅ Image Picker Test Success (Mobile): ${imageFile.path}'),
+              content: Text(
+                  '✅ Image Picker Test Success (Mobile): ${imageFile.path}'),
               backgroundColor: Colors.green,
               duration: const Duration(seconds: 3),
             ),
@@ -784,7 +779,8 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text('❌ Image Picker Test Failed - No image selected'),
+              content:
+                  const Text('❌ Image Picker Test Failed - No image selected'),
               backgroundColor: Colors.red,
               duration: const Duration(seconds: 3),
             ),
@@ -807,53 +803,59 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
   void _testPermissions() async {
     try {
       print('🔐 Testing permissions...');
-      
+
       final permissions = await PermissionChecker.checkAllPermissions();
       print('🔐 Permission results: $permissions');
-      
+
       final cameraGranted = permissions['camera'] ?? false;
       final storageGranted = permissions['storage'] ?? false;
-      
+
       String message = 'Permissions: ';
       if (cameraGranted && storageGranted) {
         message += '✅ All granted';
       } else {
-        message += '❌ Camera: ${cameraGranted ? "✅" : "❌"}, Storage: ${storageGranted ? "✅" : "❌"}';
-        
+        message +=
+            '❌ Camera: ${cameraGranted ? "✅" : "❌"}, Storage: ${storageGranted ? "✅" : "❌"}';
+
         // If camera permission is denied, offer to request it
         if (!cameraGranted) {
           message += '\nTap to request camera permission';
         }
       }
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
-          backgroundColor: (cameraGranted && storageGranted) ? Colors.green : Colors.orange,
+          backgroundColor:
+              (cameraGranted && storageGranted) ? Colors.green : Colors.orange,
           duration: const Duration(seconds: 4),
-          action: !cameraGranted ? SnackBarAction(
-            label: 'Request',
-            textColor: Colors.white,
-            onPressed: () async {
-              print('🔐 Requesting camera permission...');
-              final granted = await PermissionChecker.requestCameraPermission();
-              if (granted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('✅ Camera permission granted!'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('❌ Camera permission denied. Please enable in settings.'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-          ) : null,
+          action: !cameraGranted
+              ? SnackBarAction(
+                  label: 'Request',
+                  textColor: Colors.white,
+                  onPressed: () async {
+                    print('🔐 Requesting camera permission...');
+                    final granted =
+                        await PermissionChecker.requestCameraPermission();
+                    if (granted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('✅ Camera permission granted!'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              '❌ Camera permission denied. Please enable in settings.'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  },
+                )
+              : null,
         ),
       );
     } catch (e) {
@@ -870,17 +872,8 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
 
   Future<void> _registerMember() async {
     if (_formKey.currentState!.validate()) {
-      // Check if memberships are available
-      if (_membershipTypes.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No membership types available. Please add memberships first.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-      
+      // Removed membership validation - now using DurationHelper
+
       if (!await _checkInternetConnection()) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('No internet connection')),
@@ -888,7 +881,9 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
         return;
       }
 
-      if (_lockerKey != null && _lockerKey!.isNotEmpty && !(await _isLockerKeyUnique(_lockerKey!))) {
+      if (_lockerKey != null &&
+          _lockerKey!.isNotEmpty &&
+          !(await _isLockerKeyUnique(_lockerKey!))) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Locker key must be unique')),
         );
@@ -898,7 +893,9 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
       // Validate payment method
       if (_paymentMethod == 'MOBILE_BANKING' && _paymentImageUrl == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please upload payment receipt for mobile banking')),
+          const SnackBar(
+              content:
+                  Text('Please upload payment receipt for mobile banking')),
         );
         return;
       }
@@ -914,15 +911,18 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
           'lastName': _lastName,
           'weight': _weight,
           'remaining': _remaining, // Add the new "ቀሪ" field
-          'membership': _membership,
+          // Removed membership field - now using duration-only pricing
           'duration': _duration,
+          'price': _calculateTotalPrice(), // Persist price derived from selected duration
           'registerDate': _registerDate.toIso8601String(),
           'status': 'active',
           'lockerKey': _lockerKey,
           'phoneNumber': _phoneNumber,
           'lastUpdatedDate': DateTime.now().toIso8601String(),
-          'lastUpdateType': 'initial_registration', // Track initial registration
-          'originalRegisterDate': _registerDate.toIso8601String(), // Store original date
+          'lastUpdateType':
+              'initial_registration', // Track initial registration
+          'originalRegisterDate':
+              _registerDate.toIso8601String(), // Store original date
           'paymentMethod': _paymentMethod,
           'paymentImageUrl': _paymentImageUrl,
           'profileImageUrl': _profileImageUrl, // Add profile image URL
@@ -1054,70 +1054,16 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
                     validator: (value) => null, // Optional field
                   ),
                   const SizedBox(height: 16),
-                  _isLoadingMemberships
-                      ? const Center(child: CircularProgressIndicator())
-                      : _membershipTypes.isEmpty
-                          ? Container(
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: Colors.orange.shade50,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.orange.shade200),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.warning, color: Colors.orange.shade700),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      'No membership types available. Please add memberships from the home page settings.',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.orange.shade700,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _buildDropdownField(
-                                  value: _membership,
-                                  labelText: 'Membership',
-                                  icon: Icons.card_membership,
-                                  items: _membershipTypes.map((m) => m['name'] as String).toList(),
-                                  onChanged: (newValue) => forceReliableUpdate(() {
-                                    _membership = newValue!;
-                                  }),
-                                ),
-                                const SizedBox(height: 8),
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 12),
-                                  child: Text(
-                                    'Price: ${_membershipTypes.firstWhere((m) => m['name'] == _membership, orElse: () => {'price': 0})['price']} Birr/Month',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.green.shade700,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                  const SizedBox(height: 16),
                   _buildDropdownField(
                     value: _duration,
                     labelText: 'Duration',
                     icon: Icons.calendar_today,
-                    items: const [
-                      '1 Month',
-                      '2 Months',
-                      '3 Months',
-                      '6 Months',
-                      '1 Year'
-                    ],
+                    items: _durationsList.isNotEmpty
+                        ? _durationsList
+                            .map<String>((d) => (d['name'] as String?) ?? '')
+                            .where((name) => name.isNotEmpty)
+                            .toList()
+                        : DurationHelper.validDurations,
                     onChanged: (newValue) => forceReliableUpdate(() {
                       _duration = newValue!;
                     }),
@@ -1130,7 +1076,8 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
                     keyboardType: TextInputType.number,
                     onSave: (value) => _weight = int.tryParse(value!),
                     validator: (value) {
-                      if (value == null || value.isEmpty) return null; // Optional field
+                      if (value == null || value.isEmpty)
+                        return null; // Optional field
                       final int? weight = int.tryParse(value);
                       return (weight == null || weight <= 0)
                           ? 'Enter a valid weight'
@@ -1139,26 +1086,28 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
                   ),
                   const SizedBox(height: 16),
                   _buildTextFormField(
-                    key: ValueKey('remaining_field_${_membership}_${_duration}'),
+                    key: ValueKey('remaining_field_${_duration}'),
                     initialValue: _remaining?.toString(),
                     labelText: 'ቀሪ (Remaining) (Optional)',
                     icon: Icons.account_balance_wallet,
                     keyboardType: TextInputType.number,
-                    helperText: 'Max: ${_calculateTotalMembershipPrice()} Birr (${_membership} ${_duration})',
+                    helperText:
+                        'Max: ${_calculateTotalPrice()} Birr (${_duration})',
                     onSave: (value) => _remaining = int.tryParse(value!),
                     validator: (value) {
-                      if (value == null || value.isEmpty) return null; // Optional field
+                      if (value == null || value.isEmpty)
+                        return null; // Optional field
                       final int? remaining = int.tryParse(value);
                       if (remaining == null || remaining < 0) {
                         return 'Enter a valid remaining amount';
                       }
-                      
+
                       // Check if remaining amount exceeds membership price
-                      int totalMembershipPrice = _calculateTotalMembershipPrice();
-                      if (remaining > totalMembershipPrice) {
-                        return 'Remaining amount cannot exceed membership price (${totalMembershipPrice} Birr)';
+                      int totalPrice = _calculateTotalPrice();
+                      if (remaining > totalPrice) {
+                        return 'Remaining amount cannot exceed duration price (${totalPrice} Birr)';
                       }
-                      
+
                       return null;
                     },
                   ),
@@ -1289,7 +1238,8 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
             }
             try {
               final DateTime parsedDate = DateTime.parse(value);
-              if (parsedDate.isBefore(DateTime(2000)) || parsedDate.isAfter(DateTime(2100))) {
+              if (parsedDate.isBefore(DateTime(2000)) ||
+                  parsedDate.isAfter(DateTime(2100))) {
                 return 'Date must be between 2000 and 2100';
               }
               return null;
@@ -1382,7 +1332,7 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
               ],
             ),
             const SizedBox(height: 16),
-            
+
             // Image preview or upload button
             if (_paymentImageUrl != null || _paymentImage != null) ...[
               // Show uploaded image
@@ -1418,7 +1368,7 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
                 ),
               ),
               const SizedBox(height: 12),
-              
+
               // Show Cloudinary URL if available
               if (_paymentImageUrl != null) ...[
                 Container(
@@ -1434,7 +1384,8 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.cloud_done, color: Colors.green.shade600, size: 16),
+                          Icon(Icons.cloud_done,
+                              color: Colors.green.shade600, size: 16),
                           const SizedBox(width: 4),
                           Text(
                             'Uploaded to Cloudinary',
@@ -1462,7 +1413,7 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
                 ),
                 const SizedBox(height: 12),
               ],
-              
+
               Row(
                 children: [
                   Expanded(
@@ -1502,7 +1453,8 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
                   ),
                 ),
                 child: InkWell(
-                  onTap: _isUploadingImage ? null : _handlePaymentImageSelection,
+                  onTap:
+                      _isUploadingImage ? null : _handlePaymentImageSelection,
                   borderRadius: BorderRadius.circular(8),
                   child: _isUploadingImage
                       ? Center(
@@ -1645,7 +1597,7 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
               ),
             ),
             const SizedBox(height: 16),
-            
+
             // Image preview or upload button
             if (_profileImageUrl != null || _profileImage != null) ...[
               // Show uploaded profile image
@@ -1682,7 +1634,7 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
                 ),
               ),
               const SizedBox(height: 12),
-              
+
               // Show Cloudinary URL if available
               if (_profileImageUrl != null) ...[
                 Container(
@@ -1698,7 +1650,8 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.cloud_done, color: Colors.green.shade600, size: 16),
+                          Icon(Icons.cloud_done,
+                              color: Colors.green.shade600, size: 16),
                           const SizedBox(width: 4),
                           Text(
                             'Uploaded to Cloudinary',
@@ -1715,7 +1668,7 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
                 ),
                 const SizedBox(height: 12),
               ],
-              
+
               Row(
                 children: [
                   Expanded(
@@ -1755,7 +1708,8 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
                   ),
                 ),
                 child: InkWell(
-                  onTap: _isUploadingProfile ? null : _handleProfileImageSelection,
+                  onTap:
+                      _isUploadingProfile ? null : _handleProfileImageSelection,
                   borderRadius: BorderRadius.circular(12),
                   child: _isUploadingProfile
                       ? Center(
@@ -1773,7 +1727,8 @@ class _RegisterPageState extends State<RegisterPage> with ReliableStateMixin {
                                       value: _profileUploadProgress / 100,
                                       strokeWidth: 6,
                                       backgroundColor: Colors.grey.shade300,
-                                      valueColor: const AlwaysStoppedAnimation<Color>(
+                                      valueColor:
+                                          const AlwaysStoppedAnimation<Color>(
                                         Colors.deepPurple,
                                       ),
                                     ),

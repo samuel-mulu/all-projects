@@ -7,6 +7,8 @@ import 'dart:async';
 import 'login_page.dart';
 import 'home_page.dart';
 import 'screens/splash_screen.dart';
+import 'utils/network_helper.dart';
+import 'utils/device_compatibility.dart';
 
 void main() async {
   WidgetsFlutterBinding
@@ -39,7 +41,21 @@ Future<void> initializeFirebase() async {
     FirebaseDatabase.instance.setPersistenceCacheSizeBytes(10000000); // 10MB cache
   }
   
+  // Initialize network monitoring
+  NetworkHelper.initialize();
+  
+  // Initialize device compatibility
+  await DeviceCompatibility.initialize();
+  
   print('✅ Firebase initialized with persistence enabled');
+  print('✅ Network monitoring initialized');
+  print('✅ Device compatibility checked');
+  
+  // Log any compatibility issues
+  final issues = DeviceCompatibility.getCompatibilityIssues();
+  if (issues.isNotEmpty) {
+    print('⚠️ Compatibility issues: ${issues.join(', ')}');
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -136,7 +152,7 @@ class _AuthCheckState extends State<AuthCheck> {
                     ),
                     SizedBox(height: 24),
                     Text(
-                      'Alpha Gym',
+                      'Golden Gym',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 28,
