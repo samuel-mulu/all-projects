@@ -23,6 +23,7 @@ class _ActivePageState extends State<ActivePage>
   Timer? countdownTimer;
   TextEditingController searchController = TextEditingController();
   bool _showRegisterErrorDetails = false; // Toggle for showing register error details
+  StreamSubscription<DatabaseEvent>? _membersSubscription; // Live update listener
   
   // Pagination variables
   int _currentPage = 1;
@@ -33,7 +34,7 @@ class _ActivePageState extends State<ActivePage>
   @override
   void initState() {
     super.initState();
-    _fetchActiveMembers();
+    _setupLiveUpdates(); // Setup real-time listener
     _startCountdownTimer();
   }
 
@@ -48,15 +49,34 @@ class _ActivePageState extends State<ActivePage>
 
   @override
   void dispose() {
+    _membersSubscription?.cancel(); // Cancel listener when page is disposed
     countdownTimer?.cancel();
     searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _fetchActiveMembers() async {
-    try {
-      DatabaseEvent event = await _databaseRef.once();
+  // Setup live updates using Firebase real-time listener
+  void _setupLiveUpdates() {
+    final DatabaseReference membersRef = FirebaseDatabase.instance.ref('members');
+    
+    // Listen to changes in the members path
+    _membersSubscription = membersRef.onValue.listen((DatabaseEvent event) {
+      if (mounted) {
+        _processActiveMembersData(event);
+      }
+    }, onError: (error) {
+      print('Error in live updates: $error');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    });
+  }
 
+  // Process active members data from Firebase event
+  void _processActiveMembersData(DatabaseEvent event) {
+    try {
       if (event.snapshot.value != null) {
         Map<dynamic, dynamic> membersMap =
             event.snapshot.value as Map<dynamic, dynamic>;
@@ -100,11 +120,36 @@ class _ActivePageState extends State<ActivePage>
         setState(() {
           activeMembers = loadedMembers;
           filteredMembers = activeMembers;
+          // Reset pagination when data is refreshed
+          _currentPage = 1;
+          _hasMore = filteredMembers.length > _itemsPerPage;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          activeMembers = [];
+          filteredMembers = [];
+          _currentPage = 1;
+          _hasMore = false;
+          _isLoading = false;
         });
       }
     } catch (e) {
-      print('Error fetching members: $e');
-    } finally {
+      print('Error processing active members data: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  // Manual refresh function
+  Future<void> _fetchActiveMembers() async {
+    try {
+      final DatabaseReference membersRef = FirebaseDatabase.instance.ref('members');
+      final DatabaseEvent event = await membersRef.once();
+      _processActiveMembersData(event);
+    } catch (e) {
+      print('Error during manual refresh: $e');
       setState(() {
         _isLoading = false;
       });
@@ -182,7 +227,7 @@ class _ActivePageState extends State<ActivePage>
           backgroundColor: Colors.red,
           duration: Duration(seconds: 3), // Auto-dismiss after 3 seconds
           behavior: SnackBarBehavior.floating, // Floating style
-          margin: EdgeInsets.only(bottom: 20, left: 20, right: 20), // Bottom margin
+          margin: EdgeInsets.only(bottom: 100, left: 20, right: 20), // Increased bottom margin to avoid Load More button
           action: SnackBarAction(
             label: 'OK',
             textColor: Colors.white,

@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'dart:async';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -30,6 +31,7 @@ class _InactivePageState extends State<InactivePage> {
   String _userName = ''; // Store the user's name
   bool isAdmin = false; // Default to 'user'
   TextEditingController searchController = TextEditingController();
+  StreamSubscription<DatabaseEvent>? _membersSubscription; // Live update listener
   
   // Pagination variables
   int _currentPage = 1;
@@ -37,14 +39,24 @@ class _InactivePageState extends State<InactivePage> {
   bool _hasMore = true;
   bool _isLoadingMore = false;
 
+  // Selection mode variables
+  bool _isSelectionMode = false;
+  Set<String> _selectedMemberIds = {};
+  bool _isDeleting = false;
+
   @override
   void initState() {
     super.initState();
     _fetchCurrentUserRole();
-    _fetchInactiveMembers();
+    _setupLiveUpdates(); // Setup real-time listener
   }
 
-
+  @override
+  void dispose() {
+    _membersSubscription?.cancel(); // Cancel listener when page is disposed
+    searchController.dispose();
+    super.dispose();
+  }
 
   Future<void> _fetchCurrentUserRole() async {
     var _auth = FirebaseAuth.instance; // Initialize Firebase Auth
@@ -68,14 +80,28 @@ class _InactivePageState extends State<InactivePage> {
     }
   }
 
-  Future<void> _fetchInactiveMembers() async {
-    setState(() {
-      _isLoading = true; // Start loading
+  // Setup live updates using Firebase real-time listener
+  void _setupLiveUpdates() {
+    final DatabaseReference membersRef = FirebaseDatabase.instance.ref('members');
+    
+    // Listen to changes in the members path
+    _membersSubscription = membersRef.onValue.listen((DatabaseEvent event) {
+      if (mounted) {
+        _processInactiveMembersData(event);
+      }
+    }, onError: (error) {
+      print('Error in live updates: $error');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     });
+  }
 
+  // Process inactive members data from Firebase event
+  void _processInactiveMembersData(DatabaseEvent event) {
     try {
-      DatabaseEvent event = await _databaseRef.once();
-
       if (event.snapshot.value != null) {
         Map<dynamic, dynamic> members =
             event.snapshot.value as Map<dynamic, dynamic>;
@@ -96,13 +122,33 @@ class _InactivePageState extends State<InactivePage> {
         setState(() {
           inactiveMembers = loadedMembers;
           filteredMembers = inactiveMembers;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          inactiveMembers = [];
+          filteredMembers = [];
+          _isLoading = false;
         });
       }
     } catch (e) {
-      print('Error fetching members: $e');
-    } finally {
+      print('Error processing inactive members data: $e');
       setState(() {
-        _isLoading = false; // Stop loading
+        _isLoading = false;
+      });
+    }
+  }
+
+  // Manual refresh function
+  Future<void> _fetchInactiveMembers() async {
+    try {
+      final DatabaseReference membersRef = FirebaseDatabase.instance.ref('members');
+      final DatabaseEvent event = await membersRef.once();
+      _processInactiveMembersData(event);
+    } catch (e) {
+      print('Error during manual refresh: $e');
+      setState(() {
+        _isLoading = false;
       });
     }
   }
@@ -279,6 +325,230 @@ class _InactivePageState extends State<InactivePage> {
     }
     
     return dateStr;
+  }
+
+  // Toggle selection mode
+  void _toggleSelectionMode() {
+    setState(() {
+      _isSelectionMode = !_isSelectionMode;
+      if (!_isSelectionMode) {
+        _selectedMemberIds.clear();
+      }
+    });
+  }
+
+  // Toggle member selection
+  void _toggleMemberSelection(String memberId) {
+    setState(() {
+      if (_selectedMemberIds.contains(memberId)) {
+        _selectedMemberIds.remove(memberId);
+      } else {
+        _selectedMemberIds.add(memberId);
+      }
+    });
+  }
+
+  // Bulk delete selected members
+  Future<void> _bulkDeleteMembers() async {
+    if (_selectedMemberIds.isEmpty) return;
+
+    final count = _selectedMemberIds.length;
+    
+    // Show confirmation dialog
+    bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning, color: Colors.red, size: 28),
+            SizedBox(width: 8),
+            Text('Delete $count Member${count > 1 ? 's' : ''}?'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to permanently delete $count selected member${count > 1 ? 's' : ''}?',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Selected: $count member${count > 1 ? 's' : ''}',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              '⚠️ This action cannot be undone!',
+              style: TextStyle(
+                color: Colors.red.shade700,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Note: This only deletes from the members path. Report history will be preserved.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade700,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.grey.shade700,
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Delete All'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() {
+      _isDeleting = true;
+    });
+
+    int successCount = 0;
+    int failCount = 0;
+    List<String> failedMembers = [];
+    final totalCount = _selectedMemberIds.length;
+
+    // Show progress dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text('Deleting Members...'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Deleting $totalCount member(s)...\nPlease wait...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      // Delete each selected member
+      int currentIndex = 0;
+      for (String memberId in _selectedMemberIds) {
+        currentIndex++;
+
+        try {
+          // Get member name for error reporting
+          final member = inactiveMembers.firstWhere(
+            (m) => m['id'] == memberId,
+            orElse: () => {'firstName': 'Unknown', 'lastName': ''},
+          );
+          final memberName = '${member['firstName']} ${member['lastName']}';
+
+          await _databaseRef.child(memberId).remove();
+          successCount++;
+          print('✅ Deleted member: $memberName (ID: $memberId)');
+        } catch (error) {
+          failCount++;
+          final member = inactiveMembers.firstWhere(
+            (m) => m['id'] == memberId,
+            orElse: () => {'firstName': 'Unknown', 'lastName': ''},
+          );
+          failedMembers.add('${member['firstName']} ${member['lastName']}');
+          print('❌ Error deleting member $memberId: $error');
+        }
+      }
+
+      // Close progress dialog
+      Navigator.of(context).pop();
+
+      // Show result
+      if (failCount == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Successfully deleted $successCount member${successCount > 1 ? 's' : ''}'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      } else {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Deletion Results'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('✅ Successfully deleted: $successCount'),
+                SizedBox(height: 8),
+                Text('❌ Failed: $failCount'),
+                if (failedMembers.isNotEmpty) ...[
+                  SizedBox(height: 8),
+                  Text('Failed members:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ...failedMembers.map((name) => Text('  • $name')),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+
+      // Exit selection mode and refresh
+      setState(() {
+        _isSelectionMode = false;
+        _selectedMemberIds.clear();
+        _isDeleting = false;
+      });
+
+      _fetchInactiveMembers();
+    } catch (error) {
+      Navigator.of(context).pop(); // Close progress dialog
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error during bulk deletion: $error'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      setState(() {
+        _isDeleting = false;
+      });
+    }
   }
 
   // Delete member from database
@@ -937,8 +1207,21 @@ class _InactivePageState extends State<InactivePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Inactive Members'),
+        title: Text(_isSelectionMode 
+          ? '${_selectedMemberIds.length} Selected' 
+          : 'Inactive Members'),
         backgroundColor: Colors.deepPurple,
+        actions: [
+          if (isAdmin) ...[
+            // Toggle selection mode button
+            IconButton(
+              icon: Icon(_isSelectionMode ? Icons.close : Icons.check_circle_outline),
+              tooltip: _isSelectionMode ? 'Cancel Selection' : 'Select Members',
+              onPressed: _toggleSelectionMode,
+              color: _isSelectionMode ? Colors.red : Colors.amber,
+            ),
+          ],
+        ],
       ),
       body: Column(
         children: [
@@ -990,94 +1273,116 @@ class _InactivePageState extends State<InactivePage> {
                           }
                           
                           final member = paginatedList[index];
+                          final memberId = member['id'] as String;
+                          final isSelected = _selectedMemberIds.contains(memberId);
 
                           return Card(
                             margin: const EdgeInsets.symmetric(vertical: 10),
-                            elevation: 8,
+                            elevation: isSelected ? 12 : 8,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(15),
+                              side: isSelected 
+                                ? BorderSide(color: Colors.amber, width: 2)
+                                : BorderSide.none,
                             ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(15),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Profile Avatar
-                                  _buildProfileAvatar(
-                                    member['profileImageUrl'],
-                                    member['firstName'] ?? 'Unknown',
-                                    member['lastName'] ?? 'Unknown',
-                                  ),
-                                  const SizedBox(width: 15),
-                                  // Member Details
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          '${(index + 1)}. ${member['firstName'] ?? 'Unknown'} ${member['lastName'] ?? 'Unknown'}',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 18,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                            'Weight: ${member['weight'] ?? 'N/A'} kg'),
-                                        Text(
-                                            'Register Date: ${_formatDate(member['registerDate'])}'),
-                                        Text(
-                                            'Duration: ${member['duration'] ?? 'N/A'}'),
-                                        Text('ቀሪ (Remaining): ${member['remaining'] ?? 0} Birr'),
-                                        Text('Status: Inactive'),
-                                      ],
-                                    ),
-                                  ),
-                                  // Action buttons column
-                                  Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                  // Re-register Button
-                                  ElevatedButton(
-                                    onPressed: isAdmin
-                                        ? () {
-                                            _reRegister(
-                                              member['id'] ?? 'Unknown ID',
-                                              '${member['firstName'] ?? 'Unknown'} ${member['lastName'] ?? 'Unknown'}',
-                                              member['weight']?.toString() ?? 'N/A',
-                                              member['duration'] ?? '1 Month',
-                                                  _formatDate(member['registerDate']),
-                                              member, // Add member parameter
-                                            );
-                                          }
-                                        : null, // Disable the button if the user is not an admin
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.deepPurple,
-                                          foregroundColor: Colors.white,
-                                        ),
-                                        child: Text(isAdmin ? 'Re-register' : 'No Access'),
+                            color: isSelected ? Colors.amber.shade50 : null,
+                            child: InkWell(
+                              onTap: _isSelectionMode 
+                                ? () => _toggleMemberSelection(memberId)
+                                : null,
+                              borderRadius: BorderRadius.circular(15),
+                              child: Padding(
+                                padding: const EdgeInsets.all(15),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // Checkbox (only in selection mode)
+                                    if (_isSelectionMode) ...[
+                                      Checkbox(
+                                        value: isSelected,
+                                        onChanged: (value) => _toggleMemberSelection(memberId),
+                                        activeColor: Colors.amber,
                                       ),
-                                      SizedBox(height: 8),
-                                      // Delete Button (Red)
-                                      ElevatedButton.icon(
+                                      const SizedBox(width: 8),
+                                    ],
+                                    // Profile Avatar
+                                    _buildProfileAvatar(
+                                      member['profileImageUrl'],
+                                      member['firstName'] ?? 'Unknown',
+                                      member['lastName'] ?? 'Unknown',
+                                    ),
+                                    const SizedBox(width: 15),
+                                    // Member Details
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '${(index + 1)}. ${member['firstName'] ?? 'Unknown'} ${member['lastName'] ?? 'Unknown'}',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 18,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                              'Weight: ${member['weight'] ?? 'N/A'} kg'),
+                                          Text(
+                                              'Register Date: ${_formatDate(member['registerDate'])}'),
+                                          Text(
+                                              'Duration: ${member['duration'] ?? 'N/A'}'),
+                                          Text('ቀሪ (Remaining): ${member['remaining'] ?? 0} Birr'),
+                                          Text('Status: Inactive'),
+                                        ],
+                                      ),
+                                    ),
+                                    // Action buttons column (hidden in selection mode)
+                                    if (!_isSelectionMode)
+                                      Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                      // Re-register Button
+                                      ElevatedButton(
                                         onPressed: isAdmin
                                             ? () {
-                                                _deleteMember(
+                                                _reRegister(
                                                   member['id'] ?? 'Unknown ID',
                                                   '${member['firstName'] ?? 'Unknown'} ${member['lastName'] ?? 'Unknown'}',
+                                                  member['weight']?.toString() ?? 'N/A',
+                                                  member['duration'] ?? '1 Month',
+                                                      _formatDate(member['registerDate']),
+                                                  member, // Add member parameter
                                                 );
                                               }
-                                            : null,
-                                        icon: Icon(Icons.delete_forever, size: 20),
-                                        label: Text('Delete'),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.red,
-                                          foregroundColor: Colors.white,
-                                        ),
+                                            : null, // Disable the button if the user is not an admin
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.deepPurple,
+                                              foregroundColor: Colors.white,
+                                            ),
+                                            child: Text(isAdmin ? 'Re-register' : 'No Access'),
+                                          ),
+                                          SizedBox(height: 8),
+                                          // Delete Button (Red)
+                                          ElevatedButton.icon(
+                                            onPressed: isAdmin
+                                                ? () {
+                                                    _deleteMember(
+                                                      member['id'] ?? 'Unknown ID',
+                                                      '${member['firstName'] ?? 'Unknown'} ${member['lastName'] ?? 'Unknown'}',
+                                                    );
+                                                  }
+                                                : null,
+                                            icon: Icon(Icons.delete_forever, size: 20),
+                                            label: Text('Delete'),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.red,
+                                              foregroundColor: Colors.white,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ],
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           );
@@ -1086,6 +1391,76 @@ class _InactivePageState extends State<InactivePage> {
           ),
         ],
       ),
+      // Bottom action bar for bulk delete (only in selection mode)
+      bottomNavigationBar: _isSelectionMode && isAdmin
+          ? Container(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.deepPurple,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 8,
+                    offset: Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${_selectedMemberIds.length} member${_selectedMemberIds.length > 1 ? 's' : ''} selected',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        // Cancel button
+                        TextButton(
+                          onPressed: _isDeleting ? null : _toggleSelectionMode,
+                          child: Text(
+                            'Cancel',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        // Delete button
+                        ElevatedButton.icon(
+                          onPressed: (_isDeleting || _selectedMemberIds.isEmpty)
+                              ? null
+                              : _bulkDeleteMembers,
+                          icon: _isDeleting
+                              ? SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  ),
+                                )
+                              : Icon(Icons.delete_forever),
+                          label: Text(
+                            _isDeleting
+                                ? 'Deleting...'
+                                : 'Delete (${_selectedMemberIds.length})',
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
     );
   }
 

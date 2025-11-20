@@ -98,6 +98,11 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
   final TextEditingController _searchController = TextEditingController();
   bool _showSearchBar = false;
 
+  // Selection mode variables
+  bool _isSelectionMode = false;
+  Set<String> _selectedReportIds = {};
+  bool _isRequestingDeletion = false;
+
   // Removed static membership prices - now using DurationHelper
 
   static const Map<int, String> ethiopianMonths = {
@@ -195,22 +200,12 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
 
       forceReliableUpdate(() {
         membersList = reportsList;
-        filteredList = reportsList;
-        _totalPaidAmount = _calculateTotalExpectedRevenue(membersList);
-        _totalRemainingAmount = _calculateTotalRemainingAmount(membersList);
-        _netPaidAmount = _calculateNetPaidAmount(membersList);
-        _paymentMethodStats = _calculatePaymentMethodStats(membersList);
         _isLoading = false;
         _isRefreshing = false;
       });
       
-      // Apply current filters if any
-      if (_selectedMonth != null && _selectedMonth != 'All') {
-        _filterMembersByMonth();
-      }
-      if (_selectedRemainingFilter != null && _selectedRemainingFilter != 'All') {
-        _filterMembersByRemaining();
-      }
+      // Always apply current filters (respects both month and remaining filters)
+      _applyAllFilters();
       
       print('Live update: ${membersList.length} members');
     } catch (e) {
@@ -312,18 +307,15 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
 
       forceReliableUpdate(() {
         membersList = reportsList;
-        filteredList = reportsList;
-        // Initialize with "All" filter logic (total expected revenue)
-        _totalPaidAmount = _calculateTotalExpectedRevenue(membersList);
-        _totalRemainingAmount = _calculateTotalRemainingAmount(membersList);
-        _netPaidAmount = _calculateNetPaidAmount(membersList);
-        _paymentMethodStats = _calculatePaymentMethodStats(membersList);
         _isLoading = false;
       });
       
+      // Always apply current filters (respects both month and remaining filters)
+      _applyAllFilters();
+      
       print('Data loaded: ${membersList.length} members');
       print('Total paid: $_totalPaidAmount, Total remaining: $_totalRemainingAmount');
-      print('Expected revenue: ${_calculateTotalExpectedRevenue(membersList)}');
+      print('Expected revenue: ${_calculateTotalExpectedRevenue(filteredList)}');
     } catch (e) {
       print('Error fetching reports: $e');
       forceReliableUpdate(() {
@@ -392,12 +384,55 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
   void _filterMembersByName(String query) {
     forceReliableUpdate(() {
       if (query.isEmpty) {
-        filteredList = List.from(membersList);
+        // Reset to filtered list based on month and remaining filters
+        _applyAllFilters();
       } else {
-        filteredList = membersList.where((member) {
+        // First apply month and remaining filters, then search
+        List<Map<String, dynamic>> baseFiltered = [];
+        
+        // Apply month filter
+        if (_selectedMonth == null || _selectedMonth == "All") {
+          baseFiltered = List.from(membersList);
+        } else {
+          baseFiltered = membersList.where((member) {
+            String registerDate = member['registerDate'];
+            DateTime date = DateTime.parse(registerDate);
+            String monthName = ethiopianMonths[date.month] ?? "Unknown";
+            return monthName == _selectedMonth;
+          }).toList();
+        }
+        
+        // Apply remaining filter
+        if (_selectedRemainingFilter == null || _selectedRemainingFilter == "All") {
+          // No remaining filter
+        } else if (_selectedRemainingFilter == "Has Remaining") {
+          baseFiltered = baseFiltered.where((member) {
+            int remaining = member['remaining'] ?? 0;
+            return remaining > 0;
+          }).toList();
+        }
+        // Net Paid doesn't filter members
+        
+        // Now apply name search on the filtered list
+        filteredList = baseFiltered.where((member) {
           String fullName = member['fullName'] ?? '';
           return fullName.toLowerCase().contains(query.toLowerCase());
         }).toList();
+        
+        // Recalculate amounts (but keep the filter type logic)
+        if (_selectedRemainingFilter == 'All') {
+          _totalPaidAmount = _calculateTotalExpectedRevenue(filteredList);
+          _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
+        } else if (_selectedRemainingFilter == 'Has Remaining') {
+          _totalPaidAmount = 0;
+          _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
+        } else if (_selectedRemainingFilter == 'Net Paid') {
+          _totalPaidAmount = _calculateTotalExpectedRevenue(filteredList);
+          _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
+        } else {
+          _totalPaidAmount = _calculateTotalPaidAmount(filteredList);
+          _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
+        }
       }
       // Reset pagination when filtering
       _currentPage = 1;
@@ -406,81 +441,83 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
     });
   }
 
-  void _filterMembersByMonth() {
+  // Apply both filters together (month first, then remaining)
+  void _applyAllFilters() {
     forceReliableUpdate(() {
+      // Step 1: Apply month filter first
+      List<Map<String, dynamic>> monthFiltered = [];
       if (_selectedMonth == null || _selectedMonth == "All") {
-        filteredList = List.from(membersList);
+        // Show all months
+        monthFiltered = List.from(membersList);
       } else {
-        filteredList = membersList.where((member) {
+        // Filter by selected month
+        monthFiltered = membersList.where((member) {
           String registerDate = member['registerDate'];
           DateTime date = DateTime.parse(registerDate);
           String monthName = ethiopianMonths[date.month] ?? "Unknown";
           return monthName == _selectedMonth;
         }).toList();
       }
-      _applyRemainingFilter();
+
+      // Step 2: Apply remaining filter on month-filtered results
+      if (_selectedRemainingFilter == null || _selectedRemainingFilter == "All") {
+        // No remaining filter - use month-filtered list
+        filteredList = monthFiltered;
+      } else if (_selectedRemainingFilter == "Has Remaining") {
+        // Filter to only members with remaining > 0
+        filteredList = monthFiltered.where((member) {
+          int remaining = member['remaining'] ?? 0;
+          return remaining > 0;
+        }).toList();
+      } else if (_selectedRemainingFilter == "Net Paid") {
+        // Don't filter members, show all but calculate net paid
+        filteredList = monthFiltered;
+      } else {
+        filteredList = monthFiltered;
+      }
+      
+      // Step 3: Recalculate amounts with filtered data based on filter type
+      if (_selectedRemainingFilter == 'All') {
+        // All: Show total expected revenue (total membership price)
+        _totalPaidAmount = _calculateTotalExpectedRevenue(filteredList);
+        _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
+      } else if (_selectedRemainingFilter == 'Has Remaining') {
+        // Has Remaining: Show only remaining amounts
+        _totalPaidAmount = 0; // Not relevant for this filter
+        _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
+      } else if (_selectedRemainingFilter == 'Net Paid') {
+        // Net Paid: Show total expected revenue and remaining separately
+        // So the display can calculate: totalExpected - totalRemaining = netPaid
+        _totalPaidAmount = _calculateTotalExpectedRevenue(filteredList);
+        _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
+      } else {
+        // Default: Show actual paid amounts
+        _totalPaidAmount = _calculateTotalPaidAmount(filteredList);
+        _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
+      }
+      
+      _netPaidAmount = _calculateNetPaidAmount(filteredList);
+      _paymentMethodStats = _calculatePaymentMethodStats(filteredList);
+      
       // Reset pagination when filtering
       _currentPage = 1;
       _hasMore = filteredList.length > _itemsPerPage;
-      print('Filtered by month: ${filteredList.length} members');
+      
+      print('Applied filters - Month: $_selectedMonth, Remaining: $_selectedRemainingFilter');
+      print('Filtered members: ${filteredList.length}');
+      print('Total paid: $_totalPaidAmount, Total remaining: $_totalRemainingAmount');
+      print('Net paid: ${_totalPaidAmount - _totalRemainingAmount}');
     });
   }
 
-  void _applyRemainingFilter() {
-    if (_selectedRemainingFilter == null || _selectedRemainingFilter == "All") {
-      // No additional filtering needed - keep current filteredList
-    } else if (_selectedRemainingFilter == "Has Remaining") {
-      filteredList = filteredList.where((member) {
-        int remaining = member['remaining'] ?? 0;
-        return remaining > 0;
-      }).toList();
-    } else if (_selectedRemainingFilter == "Net Paid") {
-      // Don't filter members, show all but calculate net paid
-      // No filtering needed - just change the calculation
-    }
-    
-    // Recalculate amounts with filtered data based on filter type
-    if (_selectedRemainingFilter == 'All') {
-      // All: Show total expected revenue (total membership price)
-      _totalPaidAmount = _calculateTotalExpectedRevenue(filteredList);
-      _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
-    } else if (_selectedRemainingFilter == 'Has Remaining') {
-      // Has Remaining: Show only remaining amounts
-      _totalPaidAmount = 0; // Not relevant for this filter
-      _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
-    } else if (_selectedRemainingFilter == 'Net Paid') {
-      // Net Paid: Show total expected revenue and remaining separately
-      // So the display can calculate: totalExpected - totalRemaining = netPaid
-      _totalPaidAmount = _calculateTotalExpectedRevenue(filteredList);
-      _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
-    } else {
-      // Default: Show actual paid amounts
-      _totalPaidAmount = _calculateTotalPaidAmount(filteredList);
-    _totalRemainingAmount = _calculateTotalRemainingAmount(filteredList);
-    }
-    
-    _netPaidAmount = _calculateNetPaidAmount(filteredList);
-      _paymentMethodStats = _calculatePaymentMethodStats(filteredList);
-    
-    print('Applied remaining filter: ${filteredList.length} members');
-    print('Filter: $_selectedRemainingFilter');
-    print('Total paid: $_totalPaidAmount, Total remaining: $_totalRemainingAmount');
-    print('Net paid: ${_totalPaidAmount - _totalRemainingAmount}');
-    print('Expected revenue: ${_calculateTotalExpectedRevenue(filteredList)}');
+  void _filterMembersByMonth() {
+    _applyAllFilters();
+    print('Filtered by month: ${filteredList.length} members');
   }
 
   void _filterMembersByRemaining() {
-    forceReliableUpdate(() {
-      // First reset to all members if "All" is selected
-      if (_selectedRemainingFilter == 'All') {
-        filteredList = List.from(membersList);
-      }
-      _applyRemainingFilter();
-      // Reset pagination when filtering
-      _currentPage = 1;
-      _hasMore = filteredList.length > _itemsPerPage;
-      print('Filtered by remaining: ${filteredList.length} members');
-    });
+    _applyAllFilters();
+    print('Filtered by remaining: ${filteredList.length} members');
   }
 
   // Get paginated reports for current page
@@ -674,6 +711,235 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
           ),
         );
       }
+    }
+  }
+
+  // Toggle selection mode
+  void _toggleSelectionMode() {
+    forceReliableUpdate(() {
+      _isSelectionMode = !_isSelectionMode;
+      if (!_isSelectionMode) {
+        _selectedReportIds.clear();
+      }
+    });
+  }
+
+  // Toggle report selection
+  void _toggleReportSelection(String reportId) {
+    forceReliableUpdate(() {
+      if (_selectedReportIds.contains(reportId)) {
+        _selectedReportIds.remove(reportId);
+      } else {
+        _selectedReportIds.add(reportId);
+      }
+    });
+  }
+
+  // Bulk request deletion for selected reports
+  Future<void> _bulkRequestDeletion() async {
+    if (_selectedReportIds.isEmpty) return;
+
+    final count = _selectedReportIds.length;
+    
+    // Show confirmation dialog
+    bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.delete_outline, color: Colors.orange, size: 28),
+            SizedBox(width: 8),
+            Text('Request Deletion for $count Report${count > 1 ? 's' : ''}?'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to request deletion for $count selected report${count > 1 ? 's' : ''}?',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Selected: $count report${count > 1 ? 's' : ''}',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              '⚠️ These will be marked for approval before deletion.',
+              style: TextStyle(
+                color: Colors.orange.shade700,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Note: Reports will be marked as pending deletion and sent for approval.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade700,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.grey.shade700,
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Request Delete All'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    forceReliableUpdate(() {
+      _isRequestingDeletion = true;
+    });
+
+    int successCount = 0;
+    int failCount = 0;
+    List<String> failedReports = [];
+    final totalCount = _selectedReportIds.length;
+
+    // Show progress dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text('Requesting Deletion...'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Requesting deletion for $totalCount report(s)...\nPlease wait...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      // Request deletion for each selected report
+      int currentIndex = 0;
+      for (String reportId in _selectedReportIds) {
+        currentIndex++;
+
+        try {
+          // Get report name for error reporting
+          final report = membersList.firstWhere(
+            (r) => (r['reportId'] ?? r['memberId']) == reportId,
+            orElse: () => {'fullName': 'Unknown'},
+          );
+          final reportName = report['fullName'] ?? 'Unknown';
+
+          // Mark as pending deletion (same logic as single _requestDeletion)
+          await FirebaseDatabase.instance.ref('reporte/$reportId').update({
+            'deleteStatus': 'pending_delete',
+            'deleteRequestedAt': DateTime.now().toIso8601String(),
+            'deleteRequestedBy': 'Admin',
+          });
+          successCount++;
+          print('✅ Requested deletion for: $reportName (ID: $reportId)');
+        } catch (error) {
+          failCount++;
+          final report = membersList.firstWhere(
+            (r) => (r['reportId'] ?? r['memberId']) == reportId,
+            orElse: () => {'fullName': 'Unknown'},
+          );
+          failedReports.add(report['fullName'] ?? 'Unknown');
+          print('❌ Error requesting deletion for $reportId: $error');
+        }
+      }
+
+      // Close progress dialog
+      Navigator.of(context).pop();
+
+      // Show result
+      if (failCount == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Successfully requested deletion for $successCount report${successCount > 1 ? 's' : ''}'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      } else {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Deletion Request Results'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('✅ Successfully requested: $successCount'),
+                SizedBox(height: 8),
+                Text('❌ Failed: $failCount'),
+                if (failedReports.isNotEmpty) ...[
+                  SizedBox(height: 8),
+                  Text('Failed reports:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ...failedReports.map((name) => Text('  • $name')),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+
+      // Exit selection mode
+      forceReliableUpdate(() {
+        _isSelectionMode = false;
+        _selectedReportIds.clear();
+        _isRequestingDeletion = false;
+      });
+
+      // Data will auto-refresh via live listener
+    } catch (error) {
+      Navigator.of(context).pop(); // Close progress dialog
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Error during bulk deletion request: $error'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      forceReliableUpdate(() {
+        _isRequestingDeletion = false;
+      });
     }
   }
 
@@ -949,7 +1215,9 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
       appBar: AppBar(
         title: Row(
           children: [
-            const Text('Report'),
+            Text(_isSelectionMode 
+              ? '${_selectedReportIds.length} Selected' 
+              : 'Report'),
             if (_isRefreshing) ...[
               const SizedBox(width: 12),
               const SizedBox(
@@ -964,28 +1232,36 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
           ],
         ),
         actions: [
-          // Search icon button
+          // Toggle selection mode button
           IconButton(
-            icon: Icon(
-              Icons.search,
-              color: Colors.amber,
-              size: 28,
-            ),
-            onPressed: () {
-              forceReliableUpdate(() {
-                _showSearchBar = !_showSearchBar;
-                if (!_showSearchBar) {
-                  _searchController.clear();
-                  _searchQuery = '';
-                  filteredList = List.from(membersList);
-                  // Reset pagination
-                  _currentPage = 1;
-                  _hasMore = filteredList.length > _itemsPerPage;
-                }
-              });
-            },
-            tooltip: 'Search by Name',
+            icon: Icon(_isSelectionMode ? Icons.close : Icons.check_circle_outline),
+            tooltip: _isSelectionMode ? 'Cancel Selection' : 'Select Reports',
+            onPressed: _toggleSelectionMode,
+            color: _isSelectionMode ? Colors.red : Colors.amber,
           ),
+          // Search icon button (hidden in selection mode)
+          if (!_isSelectionMode)
+            IconButton(
+              icon: Icon(
+                Icons.search,
+                color: Colors.amber,
+                size: 28,
+              ),
+              onPressed: () {
+                forceReliableUpdate(() {
+                  _showSearchBar = !_showSearchBar;
+                  if (!_showSearchBar) {
+                    _searchController.clear();
+                    _searchQuery = '';
+                    filteredList = List.from(membersList);
+                    // Reset pagination
+                    _currentPage = 1;
+                    _hasMore = filteredList.length > _itemsPerPage;
+                  }
+                });
+              },
+              tooltip: 'Search by Name',
+            ),
           // Refresh icon button
           IconButton(
             icon: Icon(
@@ -1265,31 +1541,51 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
                       
                       // Check if pending deletion
                       bool isPendingDelete = member['deleteStatus'] == 'pending_delete';
+                      final reportId = member['reportId'] ?? member['memberId'];
+                      final isSelected = _selectedReportIds.contains(reportId);
 
                       return Card(
                         margin: EdgeInsets.all(8),
-                        elevation: 10,
+                        elevation: isSelected ? 12 : 10,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
-                          side: isPendingDelete 
-                            ? BorderSide(color: Colors.orange, width: 3)
-                            : BorderSide.none,
+                          side: isSelected
+                            ? BorderSide(color: Colors.amber, width: 2)
+                            : (isPendingDelete 
+                              ? BorderSide(color: Colors.orange, width: 3)
+                              : BorderSide.none),
                         ),
-                        color: isPendingDelete ? Colors.orange.shade50 : null,
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 12,
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Profile Avatar
-                              _buildProfileAvatar(
-                                member['profileImageUrl'],
-                                member['fullName'],
-                              ),
-                              const SizedBox(width: 15),
+                        color: isSelected 
+                          ? Colors.amber.shade50 
+                          : (isPendingDelete ? Colors.orange.shade50 : null),
+                        child: InkWell(
+                          onTap: _isSelectionMode 
+                            ? () => _toggleReportSelection(reportId)
+                            : null,
+                          borderRadius: BorderRadius.circular(16),
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Checkbox (only in selection mode)
+                                if (_isSelectionMode) ...[
+                                  Checkbox(
+                                    value: isSelected,
+                                    onChanged: (value) => _toggleReportSelection(reportId),
+                                    activeColor: Colors.amber,
+                                  ),
+                                  const SizedBox(width: 8),
+                                ],
+                                // Profile Avatar
+                                _buildProfileAvatar(
+                                  member['profileImageUrl'],
+                                  member['fullName'],
+                                ),
+                                const SizedBox(width: 15),
                               // Member Details
                               Expanded(
                                 child: Column(
@@ -1381,69 +1677,141 @@ class _ReporterPageState extends State<ReporterPage> with ReliableStateMixin {
                             ],
                           ),
                               ),
-                              // Action buttons
-                              Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              // Update remaining button
-                              IconButton(
-                                icon: Icon(Icons.edit, color: Colors.orange),
-                                onPressed: () {
-                                  _updateRemaining(
-                                    member['memberId'] ?? member['reportId'], // Use memberId
-                                    member['fullName'] ?? 'Unknown',
-                                    member['remaining'] ?? 0,
-                                    member, // Pass full member data
-                                  );
-                                },
-                                tooltip: 'Update Remaining Amount',
-                              ),
-                              // Payment receipt button (if available)
-                              if (member['paymentImageUrl'] != null && 
-                                  member['paymentImageUrl'].toString().isNotEmpty)
+                              // Action buttons (hidden in selection mode)
+                              if (!_isSelectionMode)
+                                Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Update remaining button
                                 IconButton(
-                                  icon: Icon(Icons.visibility, color: Colors.blue),
+                                  icon: Icon(Icons.edit, color: Colors.orange),
                                   onPressed: () {
-                                    _showPaymentReceipt(context, member['paymentImageUrl']);
-                                  },
-                                  tooltip: 'View Payment Receipt',
-                                    ),
-                              // Delete/Cancel button - Changes based on pending status
-                              if (isPendingDelete)
-                                // Cancel Request button (Blue) for pending deletions
-                                IconButton(
-                                  icon: Icon(Icons.undo, color: Colors.blue),
-                                  onPressed: () {
-                                    _cancelDeletionRequest(
-                                      member['reportId'] ?? member['memberId'],
+                                    _updateRemaining(
+                                      member['memberId'] ?? member['reportId'], // Use memberId
                                       member['fullName'] ?? 'Unknown',
+                                      member['remaining'] ?? 0,
+                                      member, // Pass full member data
                                     );
                                   },
-                                  tooltip: 'Cancel Deletion Request',
-                                )
-                              else
-                                // Delete button (Red) for normal reports
-                                IconButton(
-                                  icon: Icon(Icons.delete_forever, color: Colors.red),
-                                  onPressed: () {
-                                    _requestDeletion(
-                                      member['reportId'] ?? member['memberId'],
-                                      member['fullName'] ?? 'Unknown',
-                                    );
-                                  },
-                                  tooltip: 'Request Deletion',
+                                  tooltip: 'Update Remaining Amount',
                                 ),
-                                ],
-                                ),
+                                // Payment receipt button (if available)
+                                if (member['paymentImageUrl'] != null && 
+                                    member['paymentImageUrl'].toString().isNotEmpty)
+                                  IconButton(
+                                    icon: Icon(Icons.visibility, color: Colors.blue),
+                                    onPressed: () {
+                                      _showPaymentReceipt(context, member['paymentImageUrl']);
+                                    },
+                                    tooltip: 'View Payment Receipt',
+                                      ),
+                                // Delete/Cancel button - Changes based on pending status
+                                if (isPendingDelete)
+                                  // Cancel Request button (Blue) for pending deletions
+                                  IconButton(
+                                    icon: Icon(Icons.undo, color: Colors.blue),
+                                    onPressed: () {
+                                      _cancelDeletionRequest(
+                                        member['reportId'] ?? member['memberId'],
+                                        member['fullName'] ?? 'Unknown',
+                                      );
+                                    },
+                                    tooltip: 'Cancel Deletion Request',
+                                  )
+                                else
+                                  // Delete button (Red) for normal reports
+                                  IconButton(
+                                    icon: Icon(Icons.delete_forever, color: Colors.red),
+                                    onPressed: () {
+                                      _requestDeletion(
+                                        member['reportId'] ?? member['memberId'],
+                                        member['fullName'] ?? 'Unknown',
+                                      );
+                                    },
+                                    tooltip: 'Request Deletion',
+                                  ),
+                                  ],
+                                  ),
                             ],
                           ),
                         ),
-                      );
+                      ),
+                    );
                     },
                   ),
                 ),
               ],
             ),
+      // Bottom action bar for bulk delete (only in selection mode)
+      bottomNavigationBar: _isSelectionMode
+          ? Container(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.blueAccent,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 8,
+                    offset: Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${_selectedReportIds.length} report${_selectedReportIds.length > 1 ? 's' : ''} selected',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        // Cancel button
+                        TextButton(
+                          onPressed: _isRequestingDeletion ? null : _toggleSelectionMode,
+                          child: Text(
+                            'Cancel',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        // Request Delete button
+                        ElevatedButton.icon(
+                          onPressed: (_isRequestingDeletion || _selectedReportIds.isEmpty)
+                              ? null
+                              : _bulkRequestDeletion,
+                          icon: _isRequestingDeletion
+                              ? SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  ),
+                                )
+                              : Icon(Icons.delete_outline),
+                          label: Text(
+                            _isRequestingDeletion
+                                ? 'Requesting...'
+                                : 'Request Delete (${_selectedReportIds.length})',
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
     );
   }
 
