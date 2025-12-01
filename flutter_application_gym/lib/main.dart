@@ -9,6 +9,7 @@ import 'home_page.dart';
 import 'screens/splash_screen.dart';
 import 'utils/network_helper.dart';
 import 'utils/device_compatibility.dart';
+import 'utils/seed_users.dart';
 
 void main() async {
   WidgetsFlutterBinding
@@ -56,6 +57,10 @@ Future<void> initializeFirebase() async {
   if (issues.isNotEmpty) {
     print('⚠️ Compatibility issues: ${issues.join(', ')}');
   }
+
+  // Seed the default user from gym project to hospital Firebase database
+  // TODO: Comment this out after seeding is complete (one-time operation)
+  await SeedUsers.seedDefaultGymUser();
 }
 
 class MyApp extends StatelessWidget {
