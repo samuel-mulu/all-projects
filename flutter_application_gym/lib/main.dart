@@ -21,13 +21,13 @@ Future<void> initializeFirebase() async {
   if (kIsWeb) {
     await Firebase.initializeApp(
       options: const FirebaseOptions(
-        apiKey: "AIzaSyDhUdogNHff4Vy-_qGMRJ5dJ1Gui_rKCcE",
-        authDomain: "gym-3efc3.firebaseapp.com",
-        projectId: "gym-3efc3",
-        storageBucket: "gym-3efc3.appspot.com",
-        messagingSenderId: "944325716762",
-        appId: "1:944325716762:android:8489937fe506b9b7b81aa3",
-        databaseURL: "https://gym-3efc3-default-rtdb.firebaseio.com",
+        apiKey: "AIzaSyDjp9nNutDEKo4u0lHlhjEhZYL0iHOqbNY",
+        authDomain: "hospital-ed68d.firebaseapp.com",
+        projectId: "hospital-ed68d",
+        storageBucket: "hospital-ed68d.firebasestorage.app",
+        messagingSenderId: "1024658380909",
+        appId: "1:1024658380909:web:1f426681e8001525830764",
+        databaseURL: "https://hospital-ed68d-default-rtdb.firebaseio.com",
       ),
     );
     

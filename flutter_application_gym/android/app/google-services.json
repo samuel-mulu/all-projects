@@ -1,22 +1,22 @@
 {
   "project_info": {
-    "project_number": "944325716762",
-    "firebase_url": "https://gym-3efc3-default-rtdb.firebaseio.com",
-    "project_id": "gym-3efc3",
-    "storage_bucket": "gym-3efc3.appspot.com"
+    "project_number": "1024658380909",
+    "firebase_url": "https://hospital-ed68d-default-rtdb.firebaseio.com",
+    "project_id": "hospital-ed68d",
+    "storage_bucket": "hospital-ed68d.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:944325716762:android:8489937fe506b9b7b81aa3",
+        "mobilesdk_app_id": "1:1024658380909:android:215393f50dba68a1830764",
         "android_client_info": {
-          "package_name": "gym.com"
+          "package_name": "hos.com"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyD4oOuf93iQvWxNv8YemnRV0uH9X7tm__k"
+          "current_key": "AIzaSyBvlTijMbjvyVbt5MuwNu7Qha4VUA-bYtQ"
         }
       ],
       "services": {
