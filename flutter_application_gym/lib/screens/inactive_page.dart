@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -655,6 +656,34 @@ class _InactivePageState extends State<InactivePage> {
           ),
         );
         print('❌ Error deleting member: $error');
+      }
+    }
+  }
+
+  // Open QR code URL for member
+  Future<void> _openQRCodeUrl(String memberId) async {
+    try {
+      final url = Uri.parse('https://gym-qr-scanner.vercel.app/scan/$memberId');
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not open QR code URL'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error opening QR code: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
@@ -1341,6 +1370,15 @@ class _InactivePageState extends State<InactivePage> {
                                       Column(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
+                                      // QR Code Button
+                                      IconButton(
+                                        onPressed: () => _openQRCodeUrl(member['id'] ?? ''),
+                                        icon: Icon(Icons.qr_code_scanner),
+                                        color: Colors.teal,
+                                        tooltip: 'View QR Code',
+                                        iconSize: 28,
+                                      ),
+                                      SizedBox(height: 8),
                                       // Re-register Button
                                       ElevatedButton(
                                         onPressed: isAdmin

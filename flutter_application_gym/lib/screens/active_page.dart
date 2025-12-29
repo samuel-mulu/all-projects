@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:ethiopian_calendar/ethiopian_date_converter.dart';
 import 'package:ethiopian_calendar/model/ethiopian_date.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
 
 class ActivePage extends StatefulWidget {
@@ -243,6 +244,34 @@ class _ActivePageState extends State<ActivePage>
 
   Future<void> _moveToInactivePage(String memberId) async {
     await _databaseRef.child(memberId).update({'status': 'inactive'});
+  }
+
+  // Open QR code URL for member
+  Future<void> _openQRCodeUrl(String memberId) async {
+    try {
+      final url = Uri.parse('https://gym-qr-scanner.vercel.app/scan/$memberId');
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Could not open QR code URL'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error opening QR code: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   // Function to filter members based on search query
@@ -894,6 +923,14 @@ class _ActivePageState extends State<ActivePage>
                                 remainingDays, member['duration']),
                           ],
                         ),
+                            ),
+                            // QR Code Button
+                            IconButton(
+                              onPressed: () => _openQRCodeUrl(member['id']),
+                              icon: Icon(Icons.qr_code_scanner),
+                              color: Colors.teal,
+                              tooltip: 'View QR Code',
+                              iconSize: 28,
                             ),
                             // Update Button
                             const SizedBox(width: 10),
