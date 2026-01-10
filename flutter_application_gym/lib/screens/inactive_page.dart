@@ -664,24 +664,58 @@ class _InactivePageState extends State<InactivePage> {
   Future<void> _openQRCodeUrl(String memberId) async {
     try {
       final url = Uri.parse('https://gym-qr-scanner.vercel.app/scan/$memberId');
-      if (await canLaunchUrl(url)) {
-        await launchUrl(url, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Could not open QR code URL'),
-              backgroundColor: Colors.red,
-            ),
+      
+      // Try to check if URL can be launched
+      bool canLaunch = false;
+      try {
+        canLaunch = await canLaunchUrl(url);
+      } catch (e) {
+        print('Error checking if URL can be launched: $e');
+        // On some devices, canLaunchUrl might fail, so we try anyway
+        canLaunch = true;
+      }
+      
+      if (canLaunch) {
+        // Try external application first (opens in browser)
+        try {
+          final launched = await launchUrl(
+            url, 
+            mode: LaunchMode.externalApplication,
           );
+          
+          if (!launched) {
+            // Fallback: try platform default
+            await launchUrl(url, mode: LaunchMode.platformDefault);
+          }
+        } catch (launchError) {
+          print('External launch failed, trying platform default: $launchError');
+          // Fallback: try platform default mode
+          await launchUrl(url, mode: LaunchMode.platformDefault);
+        }
+      } else {
+        // If canLaunchUrl returns false, try anyway with platform default
+        try {
+          await launchUrl(url, mode: LaunchMode.platformDefault);
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Could not open QR code URL. Please check your browser settings.'),
+                backgroundColor: Colors.red,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
         }
       }
     } catch (e) {
+      print('Error opening QR code URL: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error opening QR code: $e'),
+            content: Text('Error opening QR code: ${e.toString()}'),
             backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
           ),
         );
       }
