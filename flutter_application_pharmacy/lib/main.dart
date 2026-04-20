@@ -2,23 +2,24 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_application_pharmacy/models/medication.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+
+import 'core/theme/app_theme.dart';
+import 'core/constants/app_strings.dart';
+import 'features/auth/presentation/login_page.dart';
+import 'features/dashboard/presentation/dashboard_page.dart';
+import 'models/medication.dart';
 import 'splash_screen.dart';
-import 'login_page.dart';
-import 'home_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await initializeFirebase(); // Initialize Firebase
-  await Hive.initFlutter(); // Hive initialization
-  Box<Medication> box = await Hive.openBox<Medication>('medication');
+  await initializeFirebase();
+  await Hive.initFlutter();
+  await Hive.openBox<Medication>('medication');
 
   runApp(const MyApp());
 }
-
-class Medications {}
 
 Future<void> initializeFirebase() async {
   try {
@@ -38,10 +39,7 @@ Future<void> initializeFirebase() async {
       await Firebase.initializeApp();
     }
   } catch (e) {
-    // Use a more user-friendly error reporting method
-    print("Firebase Initialization Error: $e");
-    // Example: Show a dialog or snackbar to inform the user
-    // You can implement a SnackBar or AlertDialog to inform users of the issue
+    debugPrint('Firebase Initialization Error: $e');
   }
 }
 
@@ -51,11 +49,9 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pharmacy',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
+      title: AppStrings.appName,
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light(),
       home: const AuthCheck(),
     );
   }
@@ -72,7 +68,7 @@ class AuthCheck extends StatelessWidget {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const SplashScreen();
         } else if (snapshot.hasData) {
-          return const MyHomePage(title: '');
+          return const DashboardPage();
         } else {
           return const LoginPage();
         }
