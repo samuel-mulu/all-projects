@@ -84,7 +84,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                         ),
                         AppSpacing.heightXs,
                         Text(
-                          'Join our pharmacy management system',
+                          'Join ${AppStrings.appName}',
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                 color: AppColors.textSecondary,

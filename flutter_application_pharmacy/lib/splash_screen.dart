@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'core/constants/app_spacing.dart';
+import 'core/constants/app_strings.dart';
 import 'core/theme/app_colors.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -54,7 +55,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               ),
               AppSpacing.heightLg,
               Text(
-                'Pharmacy & Cosmetics',
+                AppStrings.appName,
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
               AppSpacing.heightXs,

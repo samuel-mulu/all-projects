@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/widgets/app_empty_state.dart';
 import '../../../core/widgets/app_text_field.dart';
-import '../../../core/widgets/section_header.dart';
 import '../../inventory/presentation/widgets/medication_list_item.dart';
 import '../controllers/sales_controller.dart';
 import 'sell_medication_page.dart';
@@ -81,17 +80,15 @@ class _SalesViewState extends State<SalesView> {
           child: ListView(
             padding: AppSpacing.pagePadding,
             children: [
-              SectionHeader(
-                title: 'Sales',
-                subtitle:
-                    'Search approved stock, filter by type, and sell one or multiple items.',
-                trailing: IconButton(
+              Align(
+                alignment: Alignment.centerRight,
+                child: IconButton(
                   tooltip: 'Batch Sell',
                   onPressed: _openBatchSellModal,
                   icon: const Icon(Icons.playlist_add_check_circle_outlined),
                 ),
               ),
-              AppSpacing.heightLg,
+              AppSpacing.heightSm,
               AppTextField(
                 controller: _searchController,
                 label: 'Search',
@@ -116,12 +113,7 @@ class _SalesViewState extends State<SalesView> {
                   }).toList(),
                 ),
               ),
-              AppSpacing.heightLg,
-              const SectionHeader(
-                title: 'Ready To Sell',
-                subtitle: 'Tap any medication to open the selling modal.',
-              ),
-              AppSpacing.heightSm,
+              AppSpacing.heightMd,
               if (_controller.filteredMedications.isEmpty)
                 AppEmptyState(
                   title: 'No Medications Ready',

@@ -1,11 +1,11 @@
 class AppStrings {
   const AppStrings._();
 
-  static const String appName = 'Pharmacy & Cosmetics';
+  static const String appName = 'Lobelia Pharmacy and Cosmetics';
   
   // Auth
   static const String login = 'Login';
-  static const String welcomeBack = 'Welcome Back';
+  static const String welcomeBack = 'Welcome to Lobelia';
   static const String createAccount = 'Create Account';
   static const String email = 'Email';
   static const String password = 'Password';

@@ -93,6 +93,14 @@ class _LoginPageState extends State<LoginPage> {
                                 color: AppColors.textSecondary,
                               ),
                         ),
+                        AppSpacing.heightXs,
+                        Text(
+                          AppStrings.appName,
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
+                        ),
                         AppSpacing.heightXl,
                         AppTextField(
                           controller: _emailController,

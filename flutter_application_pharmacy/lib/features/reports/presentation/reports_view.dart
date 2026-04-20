@@ -21,9 +21,13 @@ class ReportsView extends StatefulWidget {
 
 class _ReportsViewState extends State<ReportsView> {
   final _controller = SalesReportController();
+  final _expenseAmountController = TextEditingController();
+  final _expenseReasonController = TextEditingController();
 
   @override
   void dispose() {
+    _expenseAmountController.dispose();
+    _expenseReasonController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -41,8 +45,8 @@ class _ReportsViewState extends State<ReportsView> {
   }
 
   Future<void> _showExpenseForm() async {
-    final amountController = TextEditingController();
-    final reasonController = TextEditingController();
+    _expenseAmountController.clear();
+    _expenseReasonController.clear();
     final formKey = GlobalKey<FormState>();
     var paymentMethod = 'Cash';
     var expenseDate = _controller.selectedDate;
@@ -83,7 +87,7 @@ class _ReportsViewState extends State<ReportsView> {
                       ),
                       AppSpacing.heightMd,
                       AppTextField(
-                        controller: amountController,
+                        controller: _expenseAmountController,
                         label: 'Amount',
                         hintText: 'e.g. 250',
                         keyboardType:
@@ -98,7 +102,7 @@ class _ReportsViewState extends State<ReportsView> {
                       ),
                       AppSpacing.heightSm,
                       AppTextField(
-                        controller: reasonController,
+                        controller: _expenseReasonController,
                         label: 'Reason',
                         hintText: 'e.g. Transport',
                         maxLines: 2,
@@ -174,9 +178,11 @@ class _ReportsViewState extends State<ReportsView> {
 
                           final success = await _controller.recordExpense(
                             amount:
-                                double.tryParse(amountController.text.trim()) ??
+                                double.tryParse(
+                                  _expenseAmountController.text.trim(),
+                                ) ??
                                     0,
-                            reason: reasonController.text.trim(),
+                            reason: _expenseReasonController.text.trim(),
                             paymentMethod: paymentMethod,
                             date: expenseDate,
                           );
@@ -199,9 +205,6 @@ class _ReportsViewState extends State<ReportsView> {
         },
       ),
     );
-
-    amountController.dispose();
-    reasonController.dispose();
 
     if (!mounted || saved != true) {
       return;
@@ -288,6 +291,90 @@ class _ReportsViewState extends State<ReportsView> {
     );
   }
 
+  Map<DateTime, List<Map<String, dynamic>>> _groupSalesByDay(
+    List<Map<String, dynamic>> sales,
+  ) {
+    final grouped = <DateTime, List<Map<String, dynamic>>>{};
+    for (final sale in sales) {
+      final parsed = DateTime.tryParse((sale['date'] ?? '').toString());
+      if (parsed == null) {
+        continue;
+      }
+      final key = DateTime(parsed.year, parsed.month, parsed.day);
+      grouped.putIfAbsent(key, () => <Map<String, dynamic>>[]).add(sale);
+    }
+    return grouped;
+  }
+
+  void _showDayTransactions(
+    DateTime day,
+    List<Map<String, dynamic>> transactions,
+  ) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: 0.85,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 48,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.border,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                AppSpacing.heightMd,
+                SectionHeader(
+                  title: _controller.formatSaleDate(day.toIso8601String()),
+                  subtitle: '${transactions.length} transaction(s)',
+                ),
+                AppSpacing.heightSm,
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: transactions.length,
+                    itemBuilder: (context, index) {
+                      final sale = transactions[index];
+                      final amount = (sale['sellingPrice'] ?? 0).toString();
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                        child: AppCard(
+                          onTap: () => _showTransactionDetails(sale),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: ListTile(
+                            title: Text((sale['drugName'] ?? 'Medication').toString()),
+                            subtitle: Text(
+                              'Qty ${sale['quantitySold'] ?? 0} - '
+                              '${sale['paymentMethod'] ?? 'Unknown'}',
+                            ),
+                            trailing: Text(
+                              '$amount Birr',
+                              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -366,32 +453,39 @@ class _ReportsViewState extends State<ReportsView> {
           child: ListView(
             padding: AppSpacing.pagePadding,
             children: [
-              SectionHeader(
-                title: 'Reports',
-                subtitle:
-                    'Track daily and monthly sales with a clear, date-based report.',
-                trailing: null,
-              ),
-              AppSpacing.heightSm,
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  OutlinedButton.icon(
-                    onPressed: _showExpenseForm,
-                    icon: const Icon(Icons.add_card_outlined, size: 18),
-                    label: const Text('Expense Record'),
+                  SizedBox(
+                    height: 34,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      onPressed: _showExpenseForm,
+                      icon: const Icon(Icons.add_card_outlined, size: 16),
+                      label: const Text('Expense', style: TextStyle(fontSize: 12)),
+                    ),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const ProfitAnalyticsPage(),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.show_chart, size: 18),
-                    label: const Text('Profit'),
+                  SizedBox(
+                    height: 34,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const ProfitAnalyticsPage(),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.show_chart, size: 16),
+                      label: const Text('Profit', style: TextStyle(fontSize: 12)),
+                    ),
                   ),
                 ],
               ),
@@ -471,9 +565,7 @@ class _ReportsViewState extends State<ReportsView> {
                       ? 4
                       : constraints.maxWidth >= 600
                           ? 2
-                          : constraints.maxWidth >= 420
-                              ? 2
-                              : 1;
+                          : 2;
 
                   return GridView.builder(
                     itemCount: summaryCards.length,
@@ -490,11 +582,6 @@ class _ReportsViewState extends State<ReportsView> {
                 },
               ),
               AppSpacing.heightXl,
-              const SectionHeader(
-                title: 'Sales History',
-                subtitle: 'Tap any transaction to see the full details.',
-              ),
-              AppSpacing.heightSm,
               if (_controller.filteredSales.isEmpty)
                 AppEmptyState(
                   title: 'No Sales Found',
@@ -503,6 +590,48 @@ class _ReportsViewState extends State<ReportsView> {
                       : 'No sales were recorded for the selected month.',
                   icon: Icons.receipt_long_outlined,
                 )
+              else if (_controller.selectedPeriod == ReportPeriod.monthly)
+                ...(() {
+                  final grouped = _groupSalesByDay(_controller.filteredSales);
+                  final days = grouped.keys.toList()
+                    ..sort((a, b) => b.compareTo(a));
+                  return days.map((day) {
+                    final transactions = grouped[day]!;
+                    final dayTotal = transactions.fold<double>(0.0, (sum, sale) {
+                      final value = double.tryParse(
+                            (sale['sellingPrice'] ?? '0').toString(),
+                          ) ??
+                          0.0;
+                      return sum + value;
+                    });
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: AppCard(
+                        onTap: () => _showDayTransactions(day, transactions),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: AppColors.primary.withValues(alpha: 0.1),
+                            child: const Icon(
+                              Icons.calendar_today_outlined,
+                              color: AppColors.primary,
+                              size: 18,
+                            ),
+                          ),
+                          title: Text(_controller.formatSaleDate(day.toIso8601String())),
+                          subtitle: Text('${transactions.length} transaction(s)'),
+                          trailing: Text(
+                            '${dayTotal.toStringAsFixed(0)} Birr',
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList();
+                })()
               else
                 ..._controller.filteredSales.map((sale) {
                   final amount = (sale['sellingPrice'] ?? 0).toString();

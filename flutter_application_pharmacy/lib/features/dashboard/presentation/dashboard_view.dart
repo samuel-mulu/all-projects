@@ -117,11 +117,6 @@ class _DashboardViewState extends State<DashboardView> {
           child: ListView(
             padding: AppSpacing.pagePadding,
             children: [
-              const SectionHeader(
-                title: 'Overview',
-                subtitle: 'Track medicines that need attention and jump straight into inventory management.',
-              ),
-              AppSpacing.heightMd,
               GridView.count(
                 crossAxisCount: 2,
                 physics: const NeverScrollableScrollPhysics(),
@@ -171,11 +166,6 @@ class _DashboardViewState extends State<DashboardView> {
                 ],
               ),
               AppSpacing.heightXl,
-              const SectionHeader(
-                title: 'Recent Activity',
-                subtitle: 'Most recent transactions recorded today.',
-              ),
-              AppSpacing.heightSm,
               if (_controller.recentActivity.isEmpty)
                 const AppCard(
                   padding: AppSpacing.cardPadding,

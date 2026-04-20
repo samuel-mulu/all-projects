@@ -4,7 +4,6 @@ import '../../../core/constants/app_spacing.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_empty_state.dart';
 import '../../../core/widgets/app_text_field.dart';
-import '../../../core/widgets/section_header.dart';
 import '../controllers/inventory_controller.dart';
 import 'add_medication_page.dart';
 import 'pending_items_page.dart';
@@ -162,11 +161,6 @@ class _InventoryViewState extends State<InventoryView> {
           child: ListView(
             padding: AppSpacing.pagePadding,
             children: [
-              const SectionHeader(
-                title: 'Inventory',
-                subtitle: 'Manage approved medications, inspect full details, and edit stock records.',
-              ),
-              AppSpacing.heightMd,
               AppButton(
                 text: 'Add Medication',
                 onPressed: () => _openAddMedicationForm(),
