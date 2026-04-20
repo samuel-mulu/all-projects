@@ -5,7 +5,6 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/app_text_field.dart';
-import '../../../core/widgets/section_header.dart';
 import '../../../core/widgets/loading_overlay.dart';
 import '../controllers/medication_form_controller.dart';
 
@@ -33,10 +32,12 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
   String _medicationType = 'Tablets';
   String _strengthUnit = 'mg';
   String _measurement = 'each';
+  String _status = 'pending';
   DateTime? _expirationDate;
 
   final List<String> _types = const ['Tablets', 'Syrup', 'Injectable', 'Cream', 'Capsule', 'Ointment', 'Drop', 'Medical Supplies', 'Cosmetics'];
   final List<String> _measurements = const ['each', 'box', 'pack', 'bottle', 'vial', 'amp', 'tube'];
+  final List<String> _strengthUnits = const ['mg', 'g', 'ml', 'L', '%'];
 
   @override
   void initState() {
@@ -75,6 +76,7 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
         _medicationType = data['medicationType']?.toString() ?? _medicationType;
         _strengthUnit = data['strengthUnit']?.toString() ?? _strengthUnit;
         _measurement = data['measurement']?.toString() ?? _measurement;
+        _status = data['status']?.toString() ?? _status;
         if (data['expirationDate'] != null) {
           _expirationDate = DateTime.tryParse(data['expirationDate']);
         }
@@ -110,7 +112,7 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
         'batchNumber': _batchNumberController.text.trim(),
         'madeIn': _madeInController.text.trim(),
         'expirationDate': _expirationDate?.toIso8601String(),
-        'status': 'pending',
+        'status': widget.medicationId == null ? 'pending' : _status,
       },
     );
 
@@ -163,7 +165,7 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
                             child: _buildDropdown(
                               label: 'Type',
                               value: _medicationType,
-                              items: _types,
+                              items: _dropdownOptions(_types, _medicationType),
                               onChanged: (v) => setState(() => _medicationType = v!),
                             ),
                           ),
@@ -186,7 +188,7 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
                                   child: _buildDropdown(
                                     label: 'Unit',
                                     value: _strengthUnit,
-                                    items: const ['mg', 'g', 'ml', 'L', '%'],
+                                    items: _dropdownOptions(_strengthUnits, _strengthUnit),
                                     onChanged: (v) => setState(() => _strengthUnit = v!),
                                   ),
                                 ),
@@ -220,7 +222,7 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
                             child: _buildDropdown(
                               label: 'Measurement',
                               value: _measurement,
-                              items: _measurements,
+                              items: _dropdownOptions(_measurements, _measurement),
                               onChanged: (v) => setState(() => _measurement = v!),
                             ),
                           ),
@@ -314,7 +316,8 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
         Text(label, style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
-          value: value,
+          key: ValueKey('$label-$value'),
+          initialValue: value,
           isExpanded: true,
           decoration: const InputDecoration(
             contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -324,5 +327,13 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
         ),
       ],
     );
+  }
+
+  List<String> _dropdownOptions(List<String> defaults, String currentValue) {
+    final options = <String>[
+      ...defaults,
+      if (currentValue.isNotEmpty && !defaults.contains(currentValue)) currentValue,
+    ];
+    return options;
   }
 }

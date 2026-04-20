@@ -4,6 +4,7 @@ import '../../auth/presentation/login_page.dart';
 import '../../inventory/presentation/inventory_view.dart';
 import '../../sales/presentation/sales_view.dart';
 import '../../reports/presentation/reports_view.dart';
+import '../../settings/presentation/settings_page.dart';
 import 'dashboard_view.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -15,13 +16,7 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   int _selectedIndex = 0;
-
-  final List<Widget> _tabs = const [
-    DashboardView(),
-    InventoryView(),
-    SalesView(),
-    ReportsView(),
-  ];
+  String? _inventoryMedicationId;
 
   final List<String> _titles = const [
     'Dashboard',
@@ -38,12 +33,55 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  void _openInventory({String? medicationId}) {
+    setState(() {
+      _selectedIndex = 1;
+      _inventoryMedicationId = medicationId;
+    });
+  }
+
+  void _openSales() {
+    setState(() => _selectedIndex = 2);
+  }
+
+  void _clearInventoryFocus() {
+    if (_inventoryMedicationId == null) {
+      return;
+    }
+
+    setState(() => _inventoryMedicationId = null);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final tabs = [
+      DashboardView(
+        onOpenInventory: _openInventory,
+        onOpenSales: _openSales,
+      ),
+      InventoryView(
+        initialMedicationId: _inventoryMedicationId,
+        onMedicationFocusHandled: _clearInventoryFocus,
+      ),
+      const SalesView(),
+      const ReportsView(),
+    ];
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_titles[_selectedIndex]),
         actions: [
+          IconButton(
+            tooltip: 'Settings',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const SettingsPage(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.settings_outlined),
+          ),
           IconButton(
             tooltip: 'Sign out',
             onPressed: _signOut,
@@ -53,7 +91,7 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
       body: IndexedStack(
         index: _selectedIndex,
-        children: _tabs,
+        children: tabs,
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,

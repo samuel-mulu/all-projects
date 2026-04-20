@@ -3,7 +3,6 @@ import '../../../../core/constants/app_spacing.dart';
 import '../../../../core/widgets/app_card.dart';
 import '../../../../core/widgets/status_chip.dart';
 import '../../../../core/utils/medication_status.dart';
-import '../add_medication_page.dart';
 
 class MedicationListItem extends StatelessWidget {
   final Map<String, dynamic> medication;
@@ -25,13 +24,7 @@ class MedicationListItem extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: AppCard(
-        onTap: onTap ?? () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => AddMedicationPage(medicationId: medication['id']),
-            ),
-          );
-        },
+        onTap: onTap,
         padding: AppSpacing.cardPadding,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

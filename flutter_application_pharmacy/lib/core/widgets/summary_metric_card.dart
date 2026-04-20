@@ -7,6 +7,7 @@ class SummaryMetricCard extends StatelessWidget {
   final String value;
   final IconData icon;
   final Color? iconColor;
+  final VoidCallback? onTap;
 
   const SummaryMetricCard({
     super.key,
@@ -14,11 +15,13 @@ class SummaryMetricCard extends StatelessWidget {
     required this.value,
     required this.icon,
     this.iconColor,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return AppCard(
+      onTap: onTap,
       padding: AppSpacing.cardPadding,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -39,11 +42,15 @@ class SummaryMetricCard extends StatelessWidget {
           Text(
             value,
             style: Theme.of(context).textTheme.headlineMedium,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
           AppSpacing.heightXs,
           Text(
             title,
             style: Theme.of(context).textTheme.bodyMedium,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),

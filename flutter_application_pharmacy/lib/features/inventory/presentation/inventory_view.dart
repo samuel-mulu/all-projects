@@ -1,17 +1,25 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/widgets/app_button.dart';
+import '../../../core/widgets/app_empty_state.dart';
 import '../../../core/widgets/app_text_field.dart';
 import '../../../core/widgets/section_header.dart';
-import '../../../core/widgets/app_empty_state.dart';
 import '../controllers/inventory_controller.dart';
 import 'add_medication_page.dart';
 import 'pending_items_page.dart';
-import 'inactive_items_page.dart';
+import 'widgets/medication_details_sheet.dart';
 import 'widgets/medication_list_item.dart';
 
 class InventoryView extends StatefulWidget {
-  const InventoryView({super.key});
+  const InventoryView({
+    super.key,
+    this.initialMedicationId,
+    this.onMedicationFocusHandled,
+  });
+
+  final String? initialMedicationId;
+  final VoidCallback? onMedicationFocusHandled;
 
   @override
   State<InventoryView> createState() => _InventoryViewState();
@@ -20,6 +28,15 @@ class InventoryView extends StatefulWidget {
 class _InventoryViewState extends State<InventoryView> {
   final _controller = InventoryController();
   final _searchController = TextEditingController();
+  String? _handledMedicationId;
+
+  @override
+  void didUpdateWidget(covariant InventoryView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialMedicationId != widget.initialMedicationId) {
+      _handledMedicationId = null;
+    }
+  }
 
   @override
   void dispose() {
@@ -28,11 +45,114 @@ class _InventoryViewState extends State<InventoryView> {
     super.dispose();
   }
 
+  Future<void> _openAddMedicationForm({String? medicationId}) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AddMedicationPage(medicationId: medicationId),
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    await _controller.loadData();
+  }
+
+  Future<void> _updateMedicationStatus(
+    Map<String, dynamic> medication,
+    bool approve,
+  ) async {
+    Navigator.of(context).pop();
+
+    final medicationId = medication['id']?.toString();
+    if (medicationId == null || medicationId.isEmpty) {
+      return;
+    }
+
+    final success = approve
+        ? await _controller.approveMedication(medicationId)
+        : await _controller.rejectMedication(medicationId);
+
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          success
+              ? approve
+                  ? 'Medication approved.'
+                  : 'Medication rejected.'
+              : 'Failed to update medication status.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editMedication(Map<String, dynamic> medication) async {
+    Navigator.of(context).pop();
+    final medicationId = medication['id']?.toString();
+    if (medicationId == null || medicationId.isEmpty) {
+      return;
+    }
+
+    await _openAddMedicationForm(medicationId: medicationId);
+  }
+
+  void _showMedicationDetails(Map<String, dynamic> medication) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => MedicationDetailsSheet(
+        medication: medication,
+        onEdit: () => _editMedication(medication),
+        onApprove: _controller.isPending(medication)
+            ? () => _updateMedicationStatus(medication, true)
+            : null,
+        onReject: _controller.isPending(medication)
+            ? () => _updateMedicationStatus(medication, false)
+            : null,
+      ),
+    );
+  }
+
+  void _openFocusedMedicationIfNeeded() {
+    final medicationId = widget.initialMedicationId;
+    if (medicationId == null ||
+        _controller.isLoading ||
+        medicationId == _handledMedicationId) {
+      return;
+    }
+
+    Map<String, dynamic>? medicationToOpen;
+    for (final medication in _controller.approvedMedications) {
+      if (medication['id']?.toString() == medicationId) {
+        medicationToOpen = medication;
+        break;
+      }
+    }
+
+    _handledMedicationId = medicationId;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      widget.onMedicationFocusHandled?.call();
+      if (medicationToOpen != null) {
+        _showMedicationDetails(medicationToOpen);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
+        _openFocusedMedicationIfNeeded();
+
         if (_controller.isLoading && _controller.medications.isEmpty) {
           return const Center(child: CircularProgressIndicator());
         }
@@ -44,42 +164,22 @@ class _InventoryViewState extends State<InventoryView> {
             children: [
               const SectionHeader(
                 title: 'Inventory',
-                subtitle: 'Review stock, add new items, and monitor records.',
+                subtitle: 'Manage approved medications, inspect full details, and edit stock records.',
               ),
               AppSpacing.heightMd,
-              Row(
-                children: [
-                  Expanded(
-                    child: AppButton(
-                      text: 'Add Medication',
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const AddMedicationPage()),
-                        );
-                      },
-                    ),
-                  ),
-                  AppSpacing.widthSm,
-                  Expanded(
-                    child: AppButton(
-                      text: 'Pending',
-                      isOutlined: true,
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const PendingItemsPage()),
-                        );
-                      },
-                    ),
-                  ),
-                ],
+              AppButton(
+                text: 'Add Medication',
+                onPressed: () => _openAddMedicationForm(),
               ),
               AppSpacing.heightSm,
               AppButton(
-                text: 'View Inactive Items',
+                text: 'Pending',
                 isOutlined: true,
                 onPressed: () {
                   Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const InactiveItemsPage()),
+                    MaterialPageRoute(
+                      builder: (_) => const PendingItemsPage(),
+                    ),
                   );
                 },
               ),
@@ -111,9 +211,9 @@ class _InventoryViewState extends State<InventoryView> {
               AppSpacing.heightMd,
               if (_controller.filteredMedications.isEmpty)
                 AppEmptyState(
-                  title: 'No Medications Found',
+                  title: 'No Approved Medications',
                   message: _searchController.text.isEmpty
-                      ? 'Start by adding a new medication to your inventory.'
+                      ? 'Approved medications will appear here after review.'
                       : 'No results for "${_searchController.text}".',
                   onAction: _searchController.text.isNotEmpty
                       ? () {
@@ -125,7 +225,10 @@ class _InventoryViewState extends State<InventoryView> {
                 )
               else
                 ..._controller.filteredMedications.map((medication) {
-                  return MedicationListItem(medication: medication);
+                  return MedicationListItem(
+                    medication: medication,
+                    onTap: () => _showMedicationDetails(medication),
+                  );
                 }),
             ],
           ),

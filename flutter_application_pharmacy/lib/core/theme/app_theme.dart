@@ -9,7 +9,7 @@ class AppTheme {
   static ThemeData light() {
     final baseTextTheme = GoogleFonts.poppinsTextTheme();
     
-    final colorScheme = ColorScheme(
+    const colorScheme = ColorScheme(
       brightness: Brightness.light,
       primary: AppColors.primary,
       onPrimary: Colors.white,

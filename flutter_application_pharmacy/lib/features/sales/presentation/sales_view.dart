@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
+
 import '../../../core/constants/app_spacing.dart';
-import '../../../core/theme/app_colors.dart';
-import '../../../core/widgets/app_button.dart';
-import '../../../core/widgets/app_card.dart';
+import '../../../core/widgets/app_empty_state.dart';
+import '../../../core/widgets/app_text_field.dart';
 import '../../../core/widgets/section_header.dart';
-import '../../../core/widgets/summary_metric_card.dart';
+import '../../inventory/presentation/widgets/medication_list_item.dart';
 import '../controllers/sales_controller.dart';
 import 'sell_medication_page.dart';
 
@@ -17,92 +17,130 @@ class SalesView extends StatefulWidget {
 
 class _SalesViewState extends State<SalesView> {
   final _controller = SalesController();
+  final _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openSellModal(Map<String, dynamic> medication) async {
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => SellMedicationPage(
+        initialMedication: medication,
+        showScaffold: false,
+        autoCloseOnSuccess: true,
+      ),
+    );
+
+    if (!mounted || result != true) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Sale recorded successfully.')),
+    );
+    await _controller.loadData();
+  }
+
+  Future<void> _openBatchSellModal() async {
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const SellMedicationPage(
+        showScaffold: false,
+        autoCloseOnSuccess: true,
+      ),
+    );
+
+    if (!mounted || result != true) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Batch sale recorded successfully.')),
+    );
+    await _controller.loadData();
+  }
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
-        if (_controller.isLoading) {
+        if (_controller.isLoading && _controller.medications.isEmpty) {
           return const Center(child: CircularProgressIndicator());
         }
 
         return RefreshIndicator(
-          onRefresh: _controller.loadSales,
+          onRefresh: _controller.loadData,
           child: ListView(
             padding: AppSpacing.pagePadding,
             children: [
-              const SectionHeader(
+              SectionHeader(
                 title: 'Sales',
-                subtitle: 'Process new sales and review transaction history.',
-              ),
-              AppSpacing.heightMd,
-              GridView.count(
-                crossAxisCount: 2,
-                physics: const NeverScrollableScrollPhysics(),
-                shrinkWrap: true,
-                mainAxisSpacing: AppSpacing.sm,
-                crossAxisSpacing: AppSpacing.sm,
-                childAspectRatio: 1.1,
-                children: [
-                  SummaryMetricCard(
-                    title: 'Today Revenue',
-                    value: '${_controller.todayRevenue.toStringAsFixed(0)} Birr',
-                    icon: Icons.payments_outlined,
-                    iconColor: AppColors.active,
-                  ),
-                  SummaryMetricCard(
-                    title: 'Transactions',
-                    value: _controller.todayTransactions.toString(),
-                    icon: Icons.receipt_long_outlined,
-                    iconColor: AppColors.primary,
-                  ),
-                ],
+                subtitle:
+                    'Search approved stock, filter by type, and sell one or multiple items.',
+                trailing: IconButton(
+                  tooltip: 'Batch Sell',
+                  onPressed: _openBatchSellModal,
+                  icon: const Icon(Icons.playlist_add_check_circle_outlined),
+                ),
               ),
               AppSpacing.heightLg,
-              AppButton(
-                text: 'Sell Medication',
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SellMedicationPage()),
-                  );
-                },
-              ),
-              AppSpacing.heightXl,
-              const SectionHeader(
-                title: 'Sales History',
-                subtitle: 'Most recent transactions.',
+              AppTextField(
+                controller: _searchController,
+                label: 'Search',
+                hintText: 'Search by drug or brand name',
+                prefixIcon: const Icon(Icons.search),
+                onChanged: _controller.setSearchQuery,
               ),
               AppSpacing.heightSm,
-              if (_controller.sales.isEmpty)
-                const AppCard(
-                  padding: AppSpacing.cardPadding,
-                  child: Center(child: Text('No sales recorded yet.')),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: _controller.filterTypes.map((type) {
+                    final isSelected = _controller.selectedFilter == type;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(type),
+                        selected: isSelected,
+                        onSelected: (_) => _controller.setFilter(type),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              AppSpacing.heightLg,
+              const SectionHeader(
+                title: 'Ready To Sell',
+                subtitle: 'Tap any medication to open the selling modal.',
+              ),
+              AppSpacing.heightSm,
+              if (_controller.filteredMedications.isEmpty)
+                AppEmptyState(
+                  title: 'No Medications Ready',
+                  message: _searchController.text.isEmpty
+                      ? 'Approved medications with stock will appear here.'
+                      : 'No results for "${_searchController.text}".',
+                  actionLabel: 'Clear Search',
+                  onAction: _searchController.text.isNotEmpty
+                      ? () {
+                          _searchController.clear();
+                          _controller.setSearchQuery('');
+                        }
+                      : null,
                 )
               else
-                ..._controller.sales.take(20).map((sale) {
-                  final amount = (sale['sellingPrice'] ?? 0).toString();
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                    child: AppCard(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: ListTile(
-                        leading: const CircleAvatar(
-                          backgroundColor: Color(0x1F0F8F83),
-                          child: Icon(Icons.medication_liquid, color: AppColors.primary),
-                        ),
-                        title: Text((sale['drugName'] ?? 'Medication').toString()),
-                        subtitle: Text(
-                          'Qty ${sale['quantitySold'] ?? 0} • '
-                          '${sale['paymentMethod'] ?? 'Unknown'} • '
-                          '${sale['date'] ?? ''}',
-                        ),
-                        trailing: Text(
-                          '$amount Birr',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppColors.primary),
-                        ),
-                      ),
-                    ),
+                ..._controller.filteredMedications.map((medication) {
+                  return MedicationListItem(
+                    medication: medication,
+                    onTap: () => _openSellModal(medication),
                   );
                 }),
             ],

@@ -9,6 +9,7 @@ import 'core/constants/app_strings.dart';
 import 'features/auth/presentation/login_page.dart';
 import 'features/dashboard/presentation/dashboard_page.dart';
 import 'models/medication.dart';
+import 'services/app_settings_service.dart';
 import 'splash_screen.dart';
 
 void main() async {
@@ -17,6 +18,7 @@ void main() async {
   await initializeFirebase();
   await Hive.initFlutter();
   await Hive.openBox<Medication>('medication');
+  await AppSettingsService.instance.initialize();
 
   runApp(const MyApp());
 }
