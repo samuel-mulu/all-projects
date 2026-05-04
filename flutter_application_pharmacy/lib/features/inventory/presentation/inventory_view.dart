@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_spacing.dart';
-import '../../../core/widgets/app_button.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/app_empty_state.dart';
 import '../../../core/widgets/app_text_field.dart';
+import '../../../core/widgets/section_header.dart';
+import '../../../services/pdf_export_service.dart';
 import '../controllers/inventory_controller.dart';
 import 'add_medication_page.dart';
 import 'pending_items_page.dart';
@@ -27,7 +30,9 @@ class InventoryView extends StatefulWidget {
 class _InventoryViewState extends State<InventoryView> {
   final _controller = InventoryController();
   final _searchController = TextEditingController();
+  final _pdfExportService = const PdfExportService();
   String? _handledMedicationId;
+  bool _isExportingPdf = false;
 
   @override
   void didUpdateWidget(covariant InventoryView oldWidget) {
@@ -145,6 +150,57 @@ class _InventoryViewState extends State<InventoryView> {
     });
   }
 
+  Future<void> _openPendingPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const PendingItemsPage(),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    await _controller.loadData();
+  }
+
+  Future<void> _exportInventoryPdf() async {
+    if (_isExportingPdf) {
+      return;
+    }
+
+    setState(() => _isExportingPdf = true);
+    try {
+      await _pdfExportService.exportInventoryPdf(
+        title: 'Inventory Report',
+        medications: _controller.filteredMedications,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Inventory PDF is ready.')),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to export inventory PDF.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isExportingPdf = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -161,48 +217,100 @@ class _InventoryViewState extends State<InventoryView> {
           child: ListView(
             padding: AppSpacing.pagePadding,
             children: [
-              AppButton(
-                text: 'Add Medication',
-                onPressed: () => _openAddMedicationForm(),
+              const SectionHeader(
+                title: 'Inventory Control',
+                subtitle:
+                    'Review stock, scan pricing, and export a clean inventory table.',
               ),
-              AppSpacing.heightSm,
-              AppButton(
-                text: 'Pending',
-                isOutlined: true,
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const PendingItemsPage(),
+              AppSpacing.heightMd,
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _ActionPill(
+                    icon: Icons.add_box_outlined,
+                    label: 'Add Medication',
+                    onPressed: () => _openAddMedicationForm(),
+                    filled: true,
+                  ),
+                  _ActionPill(
+                    icon: Icons.picture_as_pdf_outlined,
+                    label: _isExportingPdf ? 'Preparing PDF...' : 'Export PDF',
+                    onPressed: _isExportingPdf ? null : _exportInventoryPdf,
+                  ),
+                  _ActionPill(
+                    icon: Icons.pending_actions_outlined,
+                    label: 'Pending (${_controller.pendingCount})',
+                    onPressed: _openPendingPage,
+                  ),
+                ],
+              ),
+              AppSpacing.heightMd,
+              AppCard(
+                padding: AppSpacing.cardPadding,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SectionHeader(
+                      title: 'Medication Browser',
+                      subtitle:
+                          'Search quickly, change sort order, and keep the list easy to scan.',
                     ),
-                  );
-                },
-              ),
-              AppSpacing.heightLg,
-              AppTextField(
-                controller: _searchController,
-                label: 'Search',
-                hintText: 'Search by drug or brand name',
-                prefixIcon: const Icon(Icons.search),
-                onChanged: _controller.setSearchQuery,
-              ),
-              AppSpacing.heightSm,
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: _controller.filterTypes.map((type) {
-                    final isSelected = _controller.selectedFilter == type;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(type),
-                        selected: isSelected,
-                        onSelected: (_) => _controller.setFilter(type),
+                    AppSpacing.heightMd,
+                    AppTextField(
+                      controller: _searchController,
+                      label: 'Search',
+                      hintText: 'Search by drug or brand name',
+                      prefixIcon: const Icon(Icons.search),
+                      onChanged: _controller.setSearchQuery,
+                    ),
+                    AppSpacing.heightSm,
+                    DropdownButtonFormField<String>(
+                      initialValue: _controller.selectedSort,
+                      decoration: const InputDecoration(
+                        labelText: 'Sort By',
                       ),
-                    );
-                  }).toList(),
+                      items:
+                          InventoryController.sortOptions.entries.map((entry) {
+                        return DropdownMenuItem<String>(
+                          value: entry.key,
+                          child: Text(entry.value),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          _controller.setSort(value);
+                        }
+                      },
+                    ),
+                    AppSpacing.heightSm,
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: _controller.filterTypes.map((type) {
+                          final isSelected = _controller.selectedFilter == type;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(type),
+                              selected: isSelected,
+                              onSelected: (_) => _controller.setFilter(type),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               AppSpacing.heightMd,
+              Text(
+                'Showing ${_controller.filteredMedications.length} medication(s)',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+              ),
+              AppSpacing.heightSm,
               if (_controller.filteredMedications.isEmpty)
                 AppEmptyState(
                   title: 'No Approved Medications',
@@ -222,12 +330,48 @@ class _InventoryViewState extends State<InventoryView> {
                   return MedicationListItem(
                     medication: medication,
                     onTap: () => _showMedicationDetails(medication),
+                    showPurchasePrice: false,
                   );
                 }),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _ActionPill extends StatelessWidget {
+  const _ActionPill({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.filled = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = filled ? Colors.white : AppColors.primary;
+    final background = filled ? AppColors.primary : AppColors.surface;
+
+    return SizedBox(
+      height: 40,
+      child: FilledButton.tonalIcon(
+        style: FilledButton.styleFrom(
+          backgroundColor: background,
+          foregroundColor: foreground,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          side: filled ? null : const BorderSide(color: AppColors.border),
+        ),
+        onPressed: onPressed,
+        icon: Icon(icon, size: 18),
+        label: Text(label),
+      ),
     );
   }
 }

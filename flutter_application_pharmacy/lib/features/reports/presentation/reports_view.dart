@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_spacing.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/sale_pricing.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../../core/widgets/app_card.dart';
 import '../../../core/widgets/app_empty_state.dart';
@@ -9,6 +10,7 @@ import '../../../core/widgets/app_error_state.dart';
 import '../../../core/widgets/app_text_field.dart';
 import '../../../core/widgets/section_header.dart';
 import '../../../core/widgets/summary_metric_card.dart';
+import '../../../services/pdf_export_service.dart';
 import '../controllers/sales_report_controller.dart';
 import 'profit_analytics_page.dart';
 
@@ -23,6 +25,8 @@ class _ReportsViewState extends State<ReportsView> {
   final _controller = SalesReportController();
   final _expenseAmountController = TextEditingController();
   final _expenseReasonController = TextEditingController();
+  final _pdfExportService = const PdfExportService();
+  bool _isExportingPdf = false;
 
   @override
   void dispose() {
@@ -90,8 +94,8 @@ class _ReportsViewState extends State<ReportsView> {
                         controller: _expenseAmountController,
                         label: 'Amount',
                         hintText: 'e.g. 250',
-                        keyboardType:
-                            const TextInputType.numberWithOptions(decimal: true),
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
                         validator: (value) {
                           final parsed = double.tryParse(value ?? '');
                           if (parsed == null || parsed <= 0) {
@@ -177,11 +181,10 @@ class _ReportsViewState extends State<ReportsView> {
                           }
 
                           final success = await _controller.recordExpense(
-                            amount:
-                                double.tryParse(
+                            amount: double.tryParse(
                                   _expenseAmountController.text.trim(),
                                 ) ??
-                                    0,
+                                0,
                             reason: _expenseReasonController.text.trim(),
                             paymentMethod: paymentMethod,
                             date: expenseDate,
@@ -221,8 +224,21 @@ class _ReportsViewState extends State<ReportsView> {
       isScrollControlled: true,
       builder: (_) {
         final reason = (sale['reason'] ?? '').toString().trim();
-        final unitPrice = (sale['unitPrice'] ?? 0).toString();
-        final totalPrice = (sale['sellingPrice'] ?? 0).toString();
+        final quantitySold =
+            int.tryParse((sale['quantitySold'] ?? 0).toString()) ?? 0;
+        final baseUnitPrice = salePricingToDouble(sale['baseUnitPrice']);
+        final unitPrice = salePricingToDouble(sale['unitPrice']);
+        final totalPrice = salePricingToDouble(sale['sellingPrice']);
+        final adjustmentType = salePriceAdjustmentTypeFromValue(
+          sale['priceAdjustmentType'],
+        );
+        final adjustmentAmount =
+            salePricingToDouble(sale['priceAdjustmentAmount']);
+        final hasAdjustment = hasMeaningfulSaleAdjustment(
+          adjustmentType: adjustmentType,
+          adjustmentAmount: adjustmentAmount,
+        );
+        final adjustmentTotal = adjustmentAmount * quantitySold;
 
         return SafeArea(
           child: FractionallySizedBox(
@@ -256,8 +272,8 @@ class _ReportsViewState extends State<ReportsView> {
                         children: [
                           _DetailRow(
                             label: 'Date',
-                            value: _controller
-                                .formatSaleDate((sale['date'] ?? '').toString()),
+                            value: _controller.formatSaleDate(
+                                (sale['date'] ?? '').toString()),
                           ),
                           _DetailRow(
                             label: 'Payment',
@@ -266,15 +282,40 @@ class _ReportsViewState extends State<ReportsView> {
                           ),
                           _DetailRow(
                             label: 'Quantity',
-                            value: (sale['quantitySold'] ?? 0).toString(),
+                            value: quantitySold.toString(),
                           ),
+                          if (hasAdjustment)
+                            _DetailRow(
+                              label: 'Base Unit Price',
+                              value: '${baseUnitPrice.toStringAsFixed(2)} Birr',
+                            ),
                           _DetailRow(
-                            label: 'Unit Price',
-                            value: '$unitPrice Birr',
+                            label: hasAdjustment
+                                ? 'Final Unit Price'
+                                : 'Unit Price',
+                            value: '${unitPrice.toStringAsFixed(2)} Birr',
                           ),
+                          if (hasAdjustment)
+                            _DetailRow(
+                              label: adjustmentType.label,
+                              value:
+                                  '${adjustmentAmount.toStringAsFixed(2)} Birr / unit',
+                            ),
+                          if (hasAdjustment && quantitySold > 0)
+                            _DetailRow(
+                              label: '${adjustmentType.label} Total',
+                              value:
+                                  '${adjustmentTotal.toStringAsFixed(2)} Birr',
+                            ),
+                          if (hasAdjustment)
+                            _DetailRow(
+                              label: 'Default Total',
+                              value:
+                                  '${(baseUnitPrice * quantitySold).toStringAsFixed(2)} Birr',
+                            ),
                           _DetailRow(
-                            label: 'Total',
-                            value: '$totalPrice Birr',
+                            label: 'Recorded Total',
+                            value: '${totalPrice.toStringAsFixed(2)} Birr',
                           ),
                           if (reason.isNotEmpty)
                             _DetailRow(label: 'Reason', value: reason),
@@ -349,14 +390,18 @@ class _ReportsViewState extends State<ReportsView> {
                           onTap: () => _showTransactionDetails(sale),
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           child: ListTile(
-                            title: Text((sale['drugName'] ?? 'Medication').toString()),
+                            title: Text(
+                                (sale['drugName'] ?? 'Medication').toString()),
                             subtitle: Text(
                               'Qty ${sale['quantitySold'] ?? 0} - '
                               '${sale['paymentMethod'] ?? 'Unknown'}',
                             ),
                             trailing: Text(
                               '$amount Birr',
-                              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(
                                     color: AppColors.primary,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -373,6 +418,51 @@ class _ReportsViewState extends State<ReportsView> {
         ),
       ),
     );
+  }
+
+  Future<void> _exportReportPdf() async {
+    if (_isExportingPdf) {
+      return;
+    }
+
+    setState(() => _isExportingPdf = true);
+    try {
+      await _pdfExportService.exportSalesReportPdf(
+        title: _controller.selectedPeriod == ReportPeriod.daily
+            ? 'Daily Sales Report'
+            : 'Monthly Sales Report',
+        periodLabel: _controller.selectedPeriodLabel,
+        paymentFilter: _controller.selectedPaymentFilter,
+        transactionCount: _controller.periodTransactions,
+        totalRevenue: _controller.periodRevenue,
+        totalExpense: _controller.periodExpense,
+        averageSale: _controller.averageTransactionValue,
+        sales: _controller.filteredSales,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Report PDF is ready.')),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to export the report PDF.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isExportingPdf = false);
+      }
+    }
   }
 
   @override
@@ -434,7 +524,7 @@ class _ReportsViewState extends State<ReportsView> {
                   iconColor: AppColors.active,
                 ),
                 SummaryMetricCard(
-                  title: 'monthle report',
+                  title: 'Month Expense',
                   value: '${_controller.periodExpense.toStringAsFixed(0)} Birr',
                   icon: Icons.calendar_month_outlined,
                   iconColor: AppColors.expired,
@@ -466,7 +556,23 @@ class _ReportsViewState extends State<ReportsView> {
                       ),
                       onPressed: _showExpenseForm,
                       icon: const Icon(Icons.add_card_outlined, size: 16),
-                      label: const Text('Expense', style: TextStyle(fontSize: 12)),
+                      label:
+                          const Text('Expense', style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                  SizedBox(
+                    height: 34,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      onPressed: _isExportingPdf ? null : _exportReportPdf,
+                      icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+                      label: Text(
+                        _isExportingPdf ? 'Preparing...' : 'PDF',
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ),
                   ),
                   SizedBox(
@@ -484,7 +590,8 @@ class _ReportsViewState extends State<ReportsView> {
                         );
                       },
                       icon: const Icon(Icons.show_chart, size: 16),
-                      label: const Text('Profit', style: TextStyle(fontSize: 12)),
+                      label:
+                          const Text('Profit', style: TextStyle(fontSize: 12)),
                     ),
                   ),
                 ],
@@ -597,7 +704,8 @@ class _ReportsViewState extends State<ReportsView> {
                     ..sort((a, b) => b.compareTo(a));
                   return days.map((day) {
                     final transactions = grouped[day]!;
-                    final dayTotal = transactions.fold<double>(0.0, (sum, sale) {
+                    final dayTotal =
+                        transactions.fold<double>(0.0, (sum, sale) {
                       final value = double.tryParse(
                             (sale['sellingPrice'] ?? '0').toString(),
                           ) ??
@@ -611,18 +719,24 @@ class _ReportsViewState extends State<ReportsView> {
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: AppColors.primary.withValues(alpha: 0.1),
+                            backgroundColor:
+                                AppColors.primary.withValues(alpha: 0.1),
                             child: const Icon(
                               Icons.calendar_today_outlined,
                               color: AppColors.primary,
                               size: 18,
                             ),
                           ),
-                          title: Text(_controller.formatSaleDate(day.toIso8601String())),
-                          subtitle: Text('${transactions.length} transaction(s)'),
+                          title: Text(_controller
+                              .formatSaleDate(day.toIso8601String())),
+                          subtitle:
+                              Text('${transactions.length} transaction(s)'),
                           trailing: Text(
                             '${dayTotal.toStringAsFixed(0)} Birr',
-                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleSmall
+                                ?.copyWith(
                                   color: AppColors.primary,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -661,13 +775,11 @@ class _ReportsViewState extends State<ReportsView> {
                         ),
                         trailing: Text(
                           '$amount Birr',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(
-                                color: AppColors.primary,
-                                fontWeight: FontWeight.bold,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                         ),
                       ),
                     ),

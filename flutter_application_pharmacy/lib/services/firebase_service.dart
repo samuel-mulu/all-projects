@@ -54,7 +54,8 @@ class FirebaseService {
 
   Future<Map<String, dynamic>?> fetchMedicationById(String medicationId) async {
     try {
-      final snapshot = await _database.child('medications/$medicationId').once();
+      final snapshot =
+          await _database.child('medications/$medicationId').once();
 
       if (snapshot.snapshot.exists) {
         final data = snapshot.snapshot.value as Map<dynamic, dynamic>;
@@ -78,7 +79,8 @@ class FirebaseService {
 
   Future<int> fetchMedicationQuantity(String medicationId) async {
     try {
-      final snapshot = await _database.child('medications/$medicationId').once();
+      final snapshot =
+          await _database.child('medications/$medicationId').once();
 
       if (snapshot.snapshot.exists && snapshot.snapshot.value is Map) {
         final data = Map<String, dynamic>.from(snapshot.snapshot.value as Map);
@@ -94,7 +96,8 @@ class FirebaseService {
     }
   }
 
-  Future<bool> updateMedicationQuantity(String medicationId, int newQuantity) async {
+  Future<bool> updateMedicationQuantity(
+      String medicationId, int newQuantity) async {
     try {
       await _database.child('medications/$medicationId').update({
         'quantity': newQuantity,
@@ -116,7 +119,8 @@ class FirebaseService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> fetchSales({int limit = 50, String? startAfterKey}) async {
+  Future<List<Map<String, dynamic>>> fetchSales(
+      {int? limit, String? startAfterKey}) async {
     try {
       Query query = _database.child('sales').orderByKey();
 
@@ -124,7 +128,9 @@ class FirebaseService {
         query = query.startAfter(startAfterKey);
       }
 
-      query = query.limitToFirst(limit);
+      if (limit != null) {
+        query = query.limitToFirst(limit);
+      }
 
       final snapshot = await query.once();
 
@@ -212,8 +218,12 @@ class FirebaseService {
     required String medicationId,
     required String drugName,
     required int quantitySold,
+    required double baseUnitPrice,
+    required double purchaseUnitPrice,
     required double unitPrice,
     required double totalSellingPrice,
+    required String priceAdjustmentType,
+    required double priceAdjustmentAmount,
     required String paymentMethod,
     required String date,
     required String reason,
@@ -223,8 +233,12 @@ class FirebaseService {
         'medicationId': medicationId,
         'drugName': drugName,
         'quantitySold': quantitySold,
+        'baseUnitPrice': baseUnitPrice,
+        'purchaseUnitPrice': purchaseUnitPrice,
         'unitPrice': unitPrice,
         'sellingPrice': totalSellingPrice,
+        'priceAdjustmentType': priceAdjustmentType,
+        'priceAdjustmentAmount': priceAdjustmentAmount,
         'paymentMethod': paymentMethod,
         'date': date,
       };
@@ -261,12 +275,16 @@ class FirebaseService {
     }
   }
 
-  Future<bool> updateMedicationStatus(String medicationId, String status) async {
+  Future<bool> updateMedicationStatus(
+      String medicationId, String status) async {
     try {
-      await _database.child('medications/$medicationId').update({'status': status});
+      await _database
+          .child('medications/$medicationId')
+          .update({'status': status});
       final cached = _medicationBox.get(medicationId);
       if (cached != null) {
-        _medicationBox.put(medicationId, Medication.fromMap({...cached.toMap(), 'status': status}));
+        _medicationBox.put(medicationId,
+            Medication.fromMap({...cached.toMap(), 'status': status}));
       }
       return true;
     } catch (e) {

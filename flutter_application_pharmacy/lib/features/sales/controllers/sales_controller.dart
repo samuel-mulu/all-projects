@@ -16,6 +16,8 @@ class SalesController extends ChangeNotifier {
   List<Map<String, dynamic>> _medications = [];
   List<Map<String, dynamic>> get medications => _medications;
 
+  int get availableMedicationCount => _medications.length;
+
   String _selectedFilter = 'All';
   String get selectedFilter => _selectedFilter;
 
@@ -35,7 +37,8 @@ class SalesController extends ChangeNotifier {
 
   List<String> get filterTypes {
     final types = _medications
-        .map((medication) => (medication['medicationType'] ?? '').toString().trim())
+        .map((medication) =>
+            (medication['medicationType'] ?? '').toString().trim())
         .where((type) => type.isNotEmpty)
         .toSet()
         .toList()
@@ -49,7 +52,8 @@ class SalesController extends ChangeNotifier {
     notifyListeners();
 
     _sales = await _firebaseService.fetchSales();
-    _medications = (await _firebaseService.fetchMedications()).where((medication) {
+    _medications =
+        (await _firebaseService.fetchMedications()).where((medication) {
       final quantity = parseMedicationQuantity(medication);
       return isMedicationApproved(medication) &&
           !isMedicationExpired(medication) &&
@@ -79,7 +83,8 @@ class SalesController extends ChangeNotifier {
     final result = _medications.where((medication) {
       final drug = (medication['drug'] ?? '').toString().toLowerCase();
       final brand = (medication['brandName'] ?? '').toString().toLowerCase();
-      final type = (medication['medicationType'] ?? '').toString().trim().toLowerCase();
+      final type =
+          (medication['medicationType'] ?? '').toString().trim().toLowerCase();
 
       final matchesFilter =
           _selectedFilter == 'All' || type == _selectedFilter.toLowerCase();
@@ -100,8 +105,10 @@ class SalesController extends ChangeNotifier {
 
   double get todayRevenue {
     final today = DateTime.now().toIso8601String().split('T').first;
-    return _sales.where((sale) => sale['date'] == today).fold<double>(0, (total, sale) {
-      final amount = double.tryParse((sale['sellingPrice'] ?? 0).toString()) ?? 0;
+    return _sales.where((sale) => sale['date'] == today).fold<double>(0,
+        (total, sale) {
+      final amount =
+          double.tryParse((sale['sellingPrice'] ?? 0).toString()) ?? 0;
       return total + amount;
     });
   }

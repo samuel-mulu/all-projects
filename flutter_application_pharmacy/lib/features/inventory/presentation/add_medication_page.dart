@@ -35,7 +35,7 @@ class _AddMedicationPageState extends State<AddMedicationPage> {
   String _status = 'pending';
   DateTime? _expirationDate;
 
-  final List<String> _types = const ['Tablets', 'Syrup', 'Injectable', 'Cream', 'Capsule', 'Ointment', 'Drop', 'Medical Supplies', 'Cosmetics'];
+  final List<String> _types = const ['Tablets', 'Syrup', 'Injectable', 'Cream', 'Capsule', 'Ointment', 'Drop', 'Medical Supplies', 'Cosmetics', 'Suppasitory'];
   final List<String> _measurements = const ['each', 'box', 'pack', 'bottle', 'vial', 'amp', 'tube'];
   final List<String> _strengthUnits = const ['mg', 'g', 'ml', 'L', '%'];
 

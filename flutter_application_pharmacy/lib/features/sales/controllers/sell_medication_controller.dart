@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/utils/sale_pricing.dart';
 import '../../../core/utils/medication_status.dart';
 import '../../../services/firebase_service.dart';
 
@@ -136,6 +137,8 @@ class SellMedicationController extends ChangeNotifier {
   Future<bool> sellMedication({
     required int quantityToSell,
     required String reason,
+    SalePriceAdjustmentType priceAdjustmentType = SalePriceAdjustmentType.none,
+    double priceAdjustmentAmount = 0.0,
   }) async {
     if (_selectedMedication == null || _quantityAvailable == null) {
       return false;
@@ -160,10 +163,29 @@ class SellMedicationController extends ChangeNotifier {
 
     try {
       final drugName = (_selectedMedication!['drug'] ?? '').toString();
-      final unitPrice = double.tryParse(
-            (_selectedMedication!['sellingPrice'] ?? 0).toString(),
-          ) ??
-          0;
+      final baseUnitPrice =
+          salePricingToDouble(_selectedMedication!['sellingPrice']);
+      final purchaseUnitPrice =
+          salePricingToDouble(_selectedMedication!['purchasedPrice']);
+      final normalizedAdjustmentAmount =
+          normalizeSaleAdjustmentAmount(priceAdjustmentAmount);
+      final effectiveAdjustmentType = hasMeaningfulSaleAdjustment(
+        adjustmentType: priceAdjustmentType,
+        adjustmentAmount: normalizedAdjustmentAmount,
+      )
+          ? priceAdjustmentType
+          : SalePriceAdjustmentType.none;
+      final unitPrice = calculateSaleUnitPrice(
+        baseUnitPrice: baseUnitPrice,
+        adjustmentType: effectiveAdjustmentType,
+        adjustmentAmount: normalizedAdjustmentAmount,
+      );
+
+      if (unitPrice < 0) {
+        _errorMessage = 'Discount cannot reduce the selling price below zero.';
+        return false;
+      }
+
       final totalSellingPrice = quantityToSell * unitPrice;
       final newQuantity = _quantityAvailable! - quantityToSell;
 
@@ -180,8 +202,12 @@ class SellMedicationController extends ChangeNotifier {
         medicationId: medicationId,
         drugName: drugName,
         quantitySold: quantityToSell,
+        baseUnitPrice: baseUnitPrice,
+        purchaseUnitPrice: purchaseUnitPrice,
         unitPrice: unitPrice,
         totalSellingPrice: totalSellingPrice,
+        priceAdjustmentType: effectiveAdjustmentType.storageValue,
+        priceAdjustmentAmount: normalizedAdjustmentAmount,
         paymentMethod: _paymentMethod,
         date: DateFormat('yyyy-MM-dd').format(DateTime.now()),
         reason: _paymentMethod == 'Credit' ? reason : '',

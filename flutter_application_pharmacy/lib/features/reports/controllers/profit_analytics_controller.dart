@@ -127,16 +127,24 @@ class ProfitAnalyticsController extends ChangeNotifier {
       final salesSnapshot = await _salesRef.get();
       if (salesSnapshot.exists) {
         for (final sale in salesSnapshot.children) {
-          final drugName = (sale.child('drugName').value ?? 'Unknown').toString();
+          final drugName =
+              (sale.child('drugName').value ?? 'Unknown').toString();
           final medicationId = sale.child('medicationId').value?.toString();
           final date = (sale.child('date').value ?? 'Unknown').toString();
           final rawQty = sale.child('quantitySold').value;
           final quantitySold = int.tryParse(rawQty?.toString() ?? '0') ?? 0;
-          final rawLineRevenue = _toDouble(sale.child('sellingPrice').value) ?? 0.0;
-          final unitSellPrice = _toDouble(sale.child('unitPrice').value) ?? 0.0;
+          final rawLineRevenue =
+              _toDouble(sale.child('sellingPrice').value) ?? 0.0;
+          final savedUnitSellPrice =
+              _toDouble(sale.child('unitPrice').value) ?? 0.0;
           final saleRevenue = rawLineRevenue > 0
               ? rawLineRevenue
-              : unitSellPrice * quantitySold;
+              : savedUnitSellPrice * quantitySold;
+          final unitSellPrice = savedUnitSellPrice > 0 && quantitySold > 0
+              ? savedUnitSellPrice
+              : quantitySold > 0
+                  ? saleRevenue / quantitySold
+                  : 0.0;
 
           if (quantitySold <= 0) {
             continue;
@@ -144,22 +152,29 @@ class ProfitAnalyticsController extends ChangeNotifier {
 
           totalSellingPrice += saleRevenue;
 
-          final medicationSnapshot = medicationId != null && medicationId.isNotEmpty
-              ? await _medicationsRef.child(medicationId).get()
-              : await _medicationsRef
-                    .orderByChild('drug')
-                    .equalTo(drugName)
-                    .limitToFirst(1)
-                    .get();
+          final savedPurchaseUnitPrice =
+              _toDouble(sale.child('purchaseUnitPrice').value);
+          var purchasedPrice = savedPurchaseUnitPrice ?? 0.0;
 
-          var purchasedPrice = 0.0;
-          if (medicationSnapshot.exists) {
-            final medicationNode =
+          if (savedPurchaseUnitPrice == null) {
+            final medicationSnapshot =
                 medicationId != null && medicationId.isNotEmpty
-                ? medicationSnapshot
-                : medicationSnapshot.children.first;
-            purchasedPrice =
-                _toDouble(medicationNode.child('purchasedPrice').value) ?? 0.0;
+                    ? await _medicationsRef.child(medicationId).get()
+                    : await _medicationsRef
+                        .orderByChild('drug')
+                        .equalTo(drugName)
+                        .limitToFirst(1)
+                        .get();
+
+            if (medicationSnapshot.exists) {
+              final medicationNode =
+                  medicationId != null && medicationId.isNotEmpty
+                      ? medicationSnapshot
+                      : medicationSnapshot.children.first;
+              purchasedPrice =
+                  _toDouble(medicationNode.child('purchasedPrice').value) ??
+                      0.0;
+            }
           }
 
           final lineCost = purchasedPrice * quantitySold;
@@ -188,8 +203,8 @@ class ProfitAnalyticsController extends ChangeNotifier {
           parsedExpenseLines.add(
             ProfitExpenseLine(
               date: (expense.child('date').value ?? 'Unknown').toString(),
-              description: (expense.child('reason').value ?? 'Expense')
-                  .toString(),
+              description:
+                  (expense.child('reason').value ?? 'Expense').toString(),
               amount: amount,
             ),
           );
